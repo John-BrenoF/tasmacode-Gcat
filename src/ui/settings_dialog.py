@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, 
-                               QLabel, QSlider, QCheckBox, QComboBox, QPushButton, QDialogButtonBox)
+                               QLabel, QSlider, QCheckBox, QComboBox, QPushButton, QDialogButtonBox, QLineEdit)
 from PySide6.QtCore import Qt
 
 class SettingsDialog(QDialog):
@@ -30,10 +30,12 @@ class SettingsDialog(QDialog):
         self.tab_editor = QWidget()
         self.tab_interface = QWidget()
         self.tab_system = QWidget()
+        self.tab_network = QWidget()
         
         self.tabs.addTab(self.tab_editor, "Editor")
         self.tabs.addTab(self.tab_interface, "Interface")
         self.tabs.addTab(self.tab_system, "Sistema")
+        self.tabs.addTab(self.tab_network, "Rede")
         
         layout.addWidget(self.tabs)
 
@@ -89,6 +91,25 @@ class SettingsDialog(QDialog):
         system_layout.addWidget(chk_restore)
         system_layout.addStretch()
 
+        # --- Configuração da Aba Rede ---
+        network_layout = QVBoxLayout(self.tab_network)
+        
+        lbl_server = QLabel("Endereço do Servidor Local:")
+        self.txt_server = QLineEdit()
+        self.txt_server.setPlaceholderText("ex: http://127.0.0.1:5000")
+        self.txt_server.setStyleSheet("background-color: #3c3c3c; color: white; padding: 5px; border: 1px solid #454545;")
+        self.txt_server.setText(self.current_config.get('server_address', ''))
+        self.txt_server.textChanged.connect(lambda v: self._update_local('server_address', v))
+        
+        lbl_note = QLabel("Nota: A conexão com o servidor local está em fase experimental e será ativada em versões futuras.")
+        lbl_note.setStyleSheet("font-style: italic; color: #808080; font-size: 11px; margin-top: 5px;")
+        lbl_note.setWordWrap(True)
+        
+        network_layout.addWidget(lbl_server)
+        network_layout.addWidget(self.txt_server)
+        network_layout.addWidget(lbl_note)
+        network_layout.addStretch()
+
         # --- Botões de Ação ---
         btn_box = QHBoxLayout()
         btn_apply = QPushButton("Aplicar")
@@ -116,5 +137,7 @@ class SettingsDialog(QDialog):
         self.config_manager.config_changed.emit(self.current_config)
 
     def _save_and_close(self):
+        addr = self.current_config.get('server_address', '')
+        print(f"[Config] Endereço do servidor atualizado para: {addr if addr else 'localhost (default)'}")
         self.config_manager.save_config(self.current_config)
         self.accept()
