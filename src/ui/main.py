@@ -387,9 +387,11 @@ class JCodeMainWindow(QMainWindow):
         """Aplica as configurações em toda a aplicação."""
         # 1. Tema
         theme_name = config.get("theme", "dark_default")
+        print(f"[Config] Loading theme: {theme_name}")
         self.theme_manager.load_theme(theme_name)
         self.theme_manager.apply_theme(QApplication.instance())
         
+        self.custom_statusbar.apply_theme(self.theme_manager.current_theme)
         # 2. Editor (Propaga para todas as abas)
         for i in range(self.editor_group.tab_widget.count()):
             editor = self.editor_group.tab_widget.widget(i)
@@ -427,7 +429,7 @@ class JCodeMainWindow(QMainWindow):
         if self.sidebar:
             self.sidebar._refresh_tree()
             self.custom_statusbar.showMessage("Explorer atualizado.", 3000)
-
+            
     def _next_tab(self):
         idx = self.editor_group.tab_widget.currentIndex()
         count = self.editor_group.tab_widget.count()
@@ -441,6 +443,7 @@ class JCodeMainWindow(QMainWindow):
             self.editor_group.tab_widget.setCurrentIndex((idx - 1) % count)
 
     def _open_project_dialog(self):
+
         """Abre diálogo para selecionar pasta de projeto."""
         folder = QFileDialog.getExistingDirectory(self, "Abrir Pasta de Projeto")
         if folder:
@@ -641,14 +644,21 @@ class JCodeMainWindow(QMainWindow):
             editor = CodeEditor()
             editor.setProperty("file_path", path)
             editor.set_dependencies(buffer, self.theme_manager, self.highlighter)
+            editor.set_buffer(buffer) # NEW
             editor.set_input_mapper(self.input_mapper)
             # Aplica configurações atuais ao novo editor
             editor.update_settings(self.config_manager.config)
-            
-            # Conecta o sinal de modificação deste buffer específico
+           
             handler = EventHandler(self.extension_bridge, buffer)
-            handler.buffer_modified.connect(self._on_buffer_modified)
-            editor.setProperty("event_handler", handler) # Mantém referência
+            
+            def on_editor_text_changed():
+                buffer.dirty = True
+                self._on_buffer_modified()
+
+            editor.text_changed.connect(on_editor_text_changed)
+
+            # Conecta o sinal de modificação deste buffer específico
+            editor.setProperty("event_handler", handler)
 
             self.editor_group.add_editor(editor, path)
             self.custom_statusbar.flash_message(f"Arquivo aberto: {os.path.basename(path)}", color="#007acc")
@@ -656,6 +666,10 @@ class JCodeMainWindow(QMainWindow):
             self.custom_statusbar.flash_message(f"Erro ao abrir: {e}", color="#dc3545")
 
     def _on_buffer_modified(self):
+
+        """Atualiza o widget CodeEditor com o conteúdo do DocumentBuffer."""
+        self._update_tab_title()
+
         """Atualiza o widget CodeEditor com o conteúdo do DocumentBuffer."""
         if not self.active_editor or not self.active_editor.buffer:
             self.setWindowTitle("JCode")
@@ -665,6 +679,8 @@ class JCodeMainWindow(QMainWindow):
 
         buffer = self.active_editor.buffer
         file_path = self.active_editor.property("file_path")
+        
+        base_name = os.path.basename(file_path) if file_path else "Novo Arquivo"
 
         # Atualiza scrollbar caso o número de linhas tenha mudado
         self.viewport_controller.update_scrollbar(buffer)
@@ -677,7 +693,6 @@ class JCodeMainWindow(QMainWindow):
 
         # Atualiza título da janela para indicar modificações
         title = "JCode - "
-        base_name = os.path.basename(file_path) if file_path else "Novo Arquivo"
         title += base_name
         if buffer.dirty:
             title += "*"
@@ -699,6 +714,58 @@ class JCodeMainWindow(QMainWindow):
         else:
             # Mostra "Novo Arquivo" ou similar se não tiver arquivo
             self.custom_statusbar.update_filename("Novo Arquivo")
+            
+    def _update_tab_title(self):
+
+
+        """Atualiza o título da aba para reflectir o estado 'dirty'."""
+        if not self.active_editor:
+            return
+
+        file_path = self.active_editor.property("file_path")
+        base_name = os.path.basename(file_path) if file_path else "Novo Arquivo"
+        buffer = self.active_editor.buffer
+        index = self.editor_group.tab_widget.currentIndex()
+        title = base_name + (" ●" if buffer.dirty else "")  # Use a bullet
+        self.editor_group.tab_widget.setTabText(index, title)
+        
+    def _close_current_tab(self):
+        """Closes the current tab with save/discard/cancel logic."""
+        current_idx = self.editor_group.tab_widget.currentIndex()
+        if current_idx == -1:
+            return
+
+        editor = self.editor_group.tab_widget.widget(current_idx)
+        if not isinstance(editor, CodeEditor):
+            self.editor_group.close_tab(current_idx)  # Close placeholder or other non-editor tabs
+            return
+
+        if editor.buffer.dirty:
+            file_path = editor.property("file_path")
+            file_name = os.path.basename(file_path) if file_path else "Untitled"
+
+            reply = QMessageBox.question(
+                self, "Salvar Alterações?",
+                f"Deseja salvar as alterações em '{file_name}'?",
+                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Save  # Default button
+            )
+
+            if reply == QMessageBox.StandardButton.Save:
+                # Save the file and then close the tab
+                self._save_file()
+                if not editor.buffer.dirty:  # Only close if save was successful
+                    self.editor_group.close_tab(current_idx)
+            elif reply == QMessageBox.StandardButton.Discard:
+                # Discard changes and close the tab
+                self.editor_group.close_tab(current_idx)
+            else:
+                # Cancel: Do nothing, just return
+                return
+        else:
+            # If not dirty, just close the tab
+            self.editor_group.close_tab(current_idx)
+
 
         self.find_action.setEnabled(True)
         
@@ -791,7 +858,7 @@ class JCodeMainWindow(QMainWindow):
                 active_file = os.path.join(root_path, active_file)
             
             for i in range(self.editor_group.tab_widget.count()):
-                editor = self.editor_group.tab_widget.widget(i)
+                editor = self.editor_group.tab_widget.widget(i)   
                 if isinstance(editor, CodeEditor) and editor.property("file_path") == active_file:
                     self.editor_group.tab_widget.setCurrentIndex(i)
                     break
@@ -799,6 +866,7 @@ class JCodeMainWindow(QMainWindow):
     def _save_session(self):
         """Salva a lista de arquivos abertos."""
         open_files = []
+
         for i in range(self.editor_group.tab_widget.count()):
             editor = self.editor_group.tab_widget.widget(i)
             if isinstance(editor, CodeEditor):
@@ -809,21 +877,37 @@ class JCodeMainWindow(QMainWindow):
                         'path': file_path, 
                         'cursor': {'line': cursor.line, 'col': cursor.col}
                     })
-        
+
         # Determina o root_path baseado no estado da Sidebar
         root_path = None
         if self.sidebar.stack.currentWidget() == self.sidebar.tree:
             root_path = self.sidebar.file_model.rootPath()
             
+
+
         active_path = self.active_editor.property("file_path") if self.active_editor else None
         
         self.session_manager.save_session(root_path, open_files, active_path)
 
+
     def _on_active_editor_changed(self, editor_widget):
+
+        """Called when the active editor changes."""
+
         self.active_editor = editor_widget
+
         if editor_widget:
+            # Connect the text_changed signal of the new active editor to the _on_buffer_modified slot
+            def on_text_changed():
+                editor_widget.buffer.dirty = True
+                self._on_buffer_modified()
+
+            editor_widget.text_changed.connect(on_text_changed)
+
             self.event_handler.buffer = editor_widget.buffer
+
             self.viewport_controller.attach_to(editor_widget)
+
         self._on_buffer_modified()
 
 def main():

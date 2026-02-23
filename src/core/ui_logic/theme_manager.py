@@ -54,7 +54,7 @@ class ThemeManager:
                 logger.error(f"Erro ao carregar tema '{theme_name}': {e}")
                 self.current_theme = self._default_theme.copy()
         else:
-            logger.warning(f"Tema '{theme_name}' não encontrado. Usando padrão.")
+            logger.warning(f"Tema '{theme_name}' não encontrado. Usando tema padrão.")
             self.current_theme = self._default_theme.copy()
 
     def get_available_themes(self) -> list[str]:
@@ -68,7 +68,8 @@ class ThemeManager:
         if not self.current_theme:
             self.current_theme = self._default_theme
 
-        bg = self.current_theme.get("background", "#1e1e1e")
+        logger.debug(f"Applying theme: {self.current_theme}")
+        bg = self.current_theme.get("background", "#282a36")
         fg = self.current_theme.get("foreground", "#d4d4d4")
         sidebar = self.current_theme.get("sidebar_bg", "#252526")
         sidebar_fg = "#cccccc"
@@ -134,5 +135,6 @@ class ThemeManager:
         app.setStyleSheet(style_sheet)
 
     def get_color(self, key: str) -> str:
+        logger.debug(f"Getting color for key: {key}, color: {self.current_theme.get(key, '#ff00ff')}")
         """Retorna uma cor específica do tema atual."""
         return self.current_theme.get(key, "#ff00ff")

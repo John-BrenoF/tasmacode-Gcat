@@ -42,7 +42,7 @@ class DocumentBuffer:
     def __init__(self, initial_text: str = ""):
         self._lines: List[str] = initial_text.split('\n') if initial_text else [""]
         self.cursors: List[Cursor] = [Cursor(0, 0)]
-        self.dirty = False
+        self.dirty: bool = False
         
         # Pilhas de Undo/Redo
         self._undo_stack: List[Action] = []

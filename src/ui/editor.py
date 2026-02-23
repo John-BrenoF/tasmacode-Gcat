@@ -9,6 +9,8 @@ class CodeEditor(QAbstractScrollArea):
     Herda de QAbstractScrollArea para controle total do desenho.
     """
     
+    text_changed = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         
@@ -57,6 +59,10 @@ class CodeEditor(QAbstractScrollArea):
         # Gutter de Linhas
         self.line_number_area = LineNumberArea(self)
         self._update_line_number_area_width()
+        
+    def set_buffer(self, buffer):
+        self.buffer = buffer
+        self.buffer.dirty = False  # Initialize the dirty flag
 
     def set_dependencies(self, buffer, theme_manager, highlighter):
         self.buffer = buffer
@@ -66,11 +72,17 @@ class CodeEditor(QAbstractScrollArea):
     def set_input_mapper(self, mapper):
         self.input_mapper = mapper
 
+    def set_file_path(self, path: str):
+        """Sets the file path and emits the file_path_changed signal."""
+        self.setProperty("file_path", path)
+
+
     def keyPressEvent(self, event):
         """Delega eventos de teclado para o InputMapper."""
         if self.input_mapper and self.input_mapper.handle_key(event):
             event.accept()
         else:
+            self.text_changed.emit()
             super().keyPressEvent(event)
 
     def mousePressEvent(self, event):

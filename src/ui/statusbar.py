@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt, QTimer, QSize
 class StatusBar(QStatusBar):
     """Barra de status customizada."""
     def __init__(self, parent=None):
+        self.theme = None
         super().__init__(parent)
         
         # Remove a alça de redimensionamento padrão para visual mais limpo
@@ -55,7 +56,7 @@ class StatusBar(QStatusBar):
         self.flash_timer.setSingleShot(True)
         self.flash_timer.timeout.connect(self._reset_style)
         
-        self._default_style = "background-color: #007acc; color: white;"
+        self._default_style = "background-color: #333; color: white;"
         self.setStyleSheet(self._default_style)
         self.showMessage("Pronto")
 
@@ -84,4 +85,29 @@ class StatusBar(QStatusBar):
 
     def _reset_style(self):
         self.setStyleSheet(self._default_style)
+        self.clearMessage()
+
+    def apply_theme(self, theme):
+        """Aplica o tema visual à barra de status."""
+        bg = theme.get("statusbar_bg")
+        fg = theme.get("foreground")
+        
+        if bg and fg:
+            style = f"""
+            QStatusBar {{
+                background-color: {bg};
+                color: {fg};
+                border: none;
+            }}
+            QStatusBar QLabel {{
+                color: {fg};
+                border: none;
+            }}
+            """
+            self.setStyleSheet(style)
+        self.theme = theme
+
+    def _reset_style(self):
+        if self.theme:
+            self.apply_theme(self.theme)
         self.clearMessage()
