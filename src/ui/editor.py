@@ -286,20 +286,27 @@ class CodeEditor(QAbstractScrollArea):
             
             # Integração com Highlighter
             if self.highlighter:
-                tokens = self.highlighter.process_block(line_text)
-                # Desenha tokens coloridos (simplificado)
+                tokens = self.highlighter.highlight(line_text)
+                # Ordena tokens para desenho sequencial correto
+                tokens.sort(key=lambda t: t.start)
+                
                 x_offset = 0
                 last_idx = 0
                 for token in tokens:
                     # Desenha texto antes do token
                     pre_text = line_text[last_idx:token.start]
-                    painter.setPen(fg_color)
-                    painter.drawText(x_offset, y, self.char_width * len(pre_text), self.line_height, Qt.AlignmentFlag.AlignLeft, pre_text)
-                    x_offset += self.char_width * len(pre_text)
+                    if pre_text:
+                        painter.setPen(fg_color)
+                        painter.drawText(x_offset, y, self.char_width * len(pre_text), self.line_height, Qt.AlignmentFlag.AlignLeft, pre_text)
+                        x_offset += self.char_width * len(pre_text)
                     
                     # Desenha token
                     token_text = line_text[token.start:token.start+token.length]
-                    painter.setPen(QColor(self.theme.get_color("accent"))) # Usa cor de destaque
+                    
+                    # Busca cor do tema baseada na chave do token (ex: 'keyword_color')
+                    token_color = QColor(self.theme.get_color(token.color_key))
+                    painter.setPen(token_color)
+                    
                     painter.drawText(x_offset, y, self.char_width * len(token_text), self.line_height, Qt.AlignmentFlag.AlignLeft, token_text)
                     x_offset += self.char_width * len(token_text)
                     last_idx = token.start + token.length

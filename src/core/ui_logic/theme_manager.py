@@ -30,7 +30,15 @@ class ThemeManager:
             "bracket_match": "#C8C8C880",
             "minimap_overlay": "#FFFFFF1A",
             "gutter_bg": "#1e1e1e",
-            "gutter_fg": "#858585"
+            "gutter_fg": "#858585",
+            # Syntax Highlighting Defaults
+            "keyword_color": "#569cd6",   # Azul VSCode
+            "builtin_color": "#569cd6",
+            "string_color": "#ce9178",    # Laranja suave
+            "comment_color": "#6a9955",   # Verde
+            "class_color": "#4ec9b0",     # Verde água
+            "function_color": "#dcdcaa",  # Amarelo claro
+            "operator_color": "#d4d4d4"
         }
 
     def load_theme(self, theme_name: str) -> None:

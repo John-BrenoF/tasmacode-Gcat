@@ -15,7 +15,7 @@ from src.core.editor_logic.buffer import DocumentBuffer
 from src.core.editor_logic.file_manager import FileManager
 from src.core.ui_logic.extension_bridge import ExtensionBridge
 from src.core.editor_logic.search_manager import SearchManager
-from src.core.editor_logic.highlighter_engine import HighlighterEngine
+from src.core.syntax_highlighter import SyntaxHighlighter
 from src.core.ui_logic.theme_manager import ThemeManager
 from src.core.session_manager import SessionManager
 from src.core.editor_logic.commands import CommandRegistry
@@ -44,7 +44,7 @@ class JCodeMainWindow(QMainWindow):
         self.active_editor = None
         
         # --- 2. Inicialização dos Subsistemas de UI Logic ---
-        self.highlighter = HighlighterEngine()
+        self.highlighter = SyntaxHighlighter()
         self.search_manager = SearchManager()
         self.extension_bridge = ExtensionBridge()
         
