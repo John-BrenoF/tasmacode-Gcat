@@ -18,8 +18,15 @@ class CodeEditor(QAbstractScrollArea):
         self.input_mapper = None
         
         # Configuração de Fonte e Métricas
-        self.font = QFont("Consolas", 12)
+        # Tenta usar fontes modernas, fallback para Monospace genérico
+        self.font = QFont("JetBrains Mono")
         self.font.setStyleHint(QFont.StyleHint.Monospace)
+        if not self.font.exactMatch():
+            self.font = QFont("Consolas")
+            if not self.font.exactMatch():
+                self.font = QFont("Monospace")
+        
+        self.font.setPointSize(12)
         self.font_metrics = QFontMetrics(self.font)
         self.line_height = self.font_metrics.height()
         self.char_width = self.font_metrics.horizontalAdvance(' ')
@@ -33,6 +40,9 @@ class CodeEditor(QAbstractScrollArea):
         # Smooth Scrolling setup
         self.verticalScrollBar().setSingleStep(20) # Rolagem mais suave por pixel
         # Para kinetic scrolling real, usariamos QScroller.grabGesture(self.viewport(), ...)
+        
+        # Padding visual (Margens internas)
+        self.setViewportMargins(10, 10, 10, 10)
 
     def set_dependencies(self, buffer, theme_manager, highlighter):
         self.buffer = buffer

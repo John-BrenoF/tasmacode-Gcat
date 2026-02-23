@@ -1,6 +1,6 @@
 import sys
 import os
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QSplitter
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QSplitter, QFileDialog
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextCursor, QAction, QKeySequence
 
@@ -21,7 +21,6 @@ from src.core.ui_logic.viewport_controller import ViewportController
 from src.ui.editor import CodeEditor
 from src.ui.sidebar import Sidebar
 from src.ui.statusbar import StatusBar
-from src.ui.minimap import Minimap
 from src.ui.command_palette import CommandPalette
 
 class JCodeMainWindow(QMainWindow):
@@ -69,12 +68,10 @@ class JCodeMainWindow(QMainWindow):
         # Componentes principais
         self.sidebar = Sidebar()
         self.editor = CodeEditor()
-        self.minimap = Minimap(self.editor)
         
         # Injeção de dependências no Editor
         self.editor.set_dependencies(self.buffer, self.theme_manager, self.highlighter)
         self.editor.set_input_mapper(self.input_mapper)
-        self.minimap.set_dependencies(self.buffer, self.theme_manager)
         
         self.custom_statusbar = StatusBar()
         self.setStatusBar(self.custom_statusbar)
@@ -87,12 +84,10 @@ class JCodeMainWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.sidebar)
         splitter.addWidget(self.editor)
-        splitter.addWidget(self.minimap)
         
         # Define proporção inicial (20% Sidebar, 80% Editor)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 4)
-        splitter.setStretchFactor(2, 0) # Minimap fixo ou pequeno
         
         self.setCentralWidget(splitter)
 
@@ -133,7 +128,7 @@ class JCodeMainWindow(QMainWindow):
         # Registra comandos básicos
         self.command_palette.register_command("Editor: Toggle Sidebar", lambda: self.sidebar.setVisible(not self.sidebar.isVisible()))
         self.command_palette.register_command("File: Save", lambda: print("Save triggered"))
-        self.command_palette.register_command("View: Toggle Minimap", lambda: self.minimap.setVisible(not self.minimap.isVisible()))
+        self.command_palette.register_command("File: Open Folder", self._open_folder_dialog)
 
     def _setup_logic_connections(self):
         """Conecta a lógica de UI aos widgets."""
@@ -145,15 +140,40 @@ class JCodeMainWindow(QMainWindow):
         
         # Exemplo de conexão de sinal: Atualizar statusbar ao scrollar
         self.viewport_controller.visible_lines_changed.connect(
-            lambda first, last: self.custom_statusbar.set_message(f"Linhas visíveis: {first} - {last}")
+            lambda first, last: self.custom_statusbar.showMessage(f"Linhas visíveis: {first} - {last}")
         )
         
         # CONEXÃO BIDIRECIONAL:
         # Conecta o sinal de modificação do buffer a um slot que atualiza a UI
         self.event_handler.buffer_modified.connect(self._on_buffer_modified)
         
+        # Conexões da Sidebar
+        self.sidebar.open_folder_clicked.connect(self._open_folder_dialog)
+        self.sidebar.file_clicked.connect(self._open_file)
+        
         # Inicializa o editor com o texto do buffer
         self._on_buffer_modified() # Usar o mesmo método para a carga inicial
+
+    def _open_folder_dialog(self):
+        """Abre diálogo para selecionar pasta."""
+        folder = QFileDialog.getExistingDirectory(self, "Abrir Pasta")
+        if folder:
+            self.sidebar.set_root_path(folder)
+
+    def _open_file(self, path):
+        """Abre um arquivo selecionado na sidebar."""
+        # TODO: Usar FileManager assíncrono aqui
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            self.buffer = DocumentBuffer(content)
+            # Re-conecta dependências pois o objeto buffer mudou
+            self.editor.set_dependencies(self.buffer, self.theme_manager, self.highlighter)
+            self.event_handler.buffer = self.buffer
+            self._on_buffer_modified()
+            self.custom_statusbar.showMessage(f"Arquivo aberto: {os.path.basename(path)}", 5000)
+        except Exception as e:
+            self.custom_statusbar.showMessage(f"Erro ao abrir arquivo: {e}", 5000)
 
     def _on_buffer_modified(self):
         """Atualiza o widget CodeEditor com o conteúdo do DocumentBuffer."""
@@ -162,12 +182,11 @@ class JCodeMainWindow(QMainWindow):
         
         # Solicita repaint
         self.editor.viewport().update()
-        self.minimap.update()
         
         # Atualiza Status Bar
         if self.buffer.cursors:
             c = self.buffer.cursors[-1]
-            self.custom_statusbar.update_info(c.line, c.col)
+            self.custom_statusbar.update_cursor_info(c.line, c.col)
         
     def _load_extensions(self):
         """Carrega plugins e conecta sinais."""

@@ -55,6 +55,7 @@ class ThemeManager:
         bg = self.current_theme.get("background", "#1e1e1e")
         fg = self.current_theme.get("foreground", "#d4d4d4")
         sidebar = self.current_theme.get("sidebar_bg", "#252526")
+        sidebar_fg = "#cccccc"
         status = self.current_theme.get("statusbar_bg", "#007acc")
         
         # Gera o QSS Global
@@ -69,8 +70,27 @@ class ThemeManager:
             font-family: 'Consolas', 'Monospace';
             font-size: 14px;
         }}
-        QWidget#Sidebar {{
+        /* Sidebar Styling */
+        QWidget#Sidebar, QTreeView {{
             background-color: {sidebar};
+            color: {sidebar_fg};
+            border: none;
+        }}
+        QTreeView::item:hover {{
+            background-color: #2a2d2e;
+        }}
+        QTreeView::item:selected {{
+            background-color: #37373d;
+            color: white;
+        }}
+        /* Sidebar Buttons */
+        QPushButton#SidebarAction {{
+            background-color: transparent;
+            border: none;
+            color: {sidebar_fg};
+        }}
+        QPushButton#SidebarAction:hover {{
+            background-color: #3e3e42;
         }}
         QStatusBar {{
             background-color: {status};
