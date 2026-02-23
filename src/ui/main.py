@@ -25,6 +25,7 @@ from src.ui.sidebar import Sidebar
 from src.ui.statusbar import StatusBar
 from src.ui.editor_group import EditorGroup
 from src.ui.command_palette import CommandPalette
+from src.ui.help_overlay import HelpOverlay
 from plugins.terminal import Terminal
 
 class JCodeMainWindow(QMainWindow):
@@ -57,6 +58,7 @@ class JCodeMainWindow(QMainWindow):
         self.resize(1024, 768)
         
         self._setup_ui()
+        self._create_actions()
         self._create_menu_bar()
         self._setup_logic_connections()
         
@@ -112,31 +114,14 @@ class JCodeMainWindow(QMainWindow):
 
         # --- Menu Arquivo ---
         file_menu = menu_bar.addMenu("&Arquivo")
-        
-        new_file_action = QAction("Novo Arquivo", self)
-        new_file_action.setEnabled(False) # Placeholder
-        file_menu.addAction(new_file_action)
-
+        file_menu.addAction(self.new_file_action)
         open_file_action = QAction("Abrir Arquivo...", self)
         open_file_action.setEnabled(False) # Placeholder
         file_menu.addAction(open_file_action)
-
-        open_folder_action = QAction("Abrir Pasta...", self)
-        open_folder_action.triggered.connect(self._open_folder_dialog)
-        file_menu.addAction(open_folder_action)
-
+        file_menu.addAction(self.open_folder_action)
         file_menu.addSeparator()
-
-        self.save_action = QAction("Salvar", self)
-        self.save_action.setShortcut(QKeySequence.StandardKey.Save)
-        self.save_action.setEnabled(False) # Desabilitado até o buffer ficar 'dirty'
-        self.save_action.triggered.connect(lambda: self.command_registry.execute("file.save"))
         file_menu.addAction(self.save_action)
-
-        save_as_action = QAction("Salvar Como...", self)
-        save_as_action.triggered.connect(lambda: self.command_registry.execute("file.save_as"))
-        file_menu.addAction(save_as_action)
-
+        file_menu.addAction(self.save_as_action)
         file_menu.addSeparator()
 
         exit_action = QAction("Sair", self)
@@ -145,16 +130,8 @@ class JCodeMainWindow(QMainWindow):
 
         # --- Menu Editar ---
         edit_menu = menu_bar.addMenu("&Editar")
-        undo_action = QAction("Desfazer", self)
-        undo_action.setShortcut(QKeySequence.StandardKey.Undo)
-        undo_action.triggered.connect(lambda: self.command_registry.execute("edit.undo"))
-        edit_menu.addAction(undo_action)
-
-        redo_action = QAction("Refazer", self)
-        redo_action.setShortcut(QKeySequence.StandardKey.Redo)
-        redo_action.triggered.connect(lambda: self.command_registry.execute("edit.redo"))
-        edit_menu.addAction(redo_action)
-
+        edit_menu.addAction(self.undo_action)
+        edit_menu.addAction(self.redo_action)
         edit_menu.addSeparator()
         # Placeholders para funcionalidades futuras
         for name in ["Recortar", "Copiar", "Colar", "Localizar"]:
@@ -164,26 +141,68 @@ class JCodeMainWindow(QMainWindow):
 
         # --- Menu Exibir ---
         view_menu = menu_bar.addMenu("&Exibir")
-        toggle_sidebar_action = QAction("Alternar Barra Lateral", self)
-        toggle_sidebar_action.triggered.connect(lambda: self.sidebar.setVisible(not self.sidebar.isVisible()))
-        view_menu.addAction(toggle_sidebar_action)
-
-        toggle_fullscreen_action = QAction("Tela Cheia", self)
-        toggle_fullscreen_action.setCheckable(True)
-        toggle_fullscreen_action.triggered.connect(lambda checked: self.showFullScreen() if checked else self.showNormal())
-        view_menu.addAction(toggle_fullscreen_action)
-
-        toggle_terminal_action = QAction("Alternar Terminal", self)
-        toggle_terminal_action.setShortcut(QKeySequence("Ctrl+`"))
-        toggle_terminal_action.triggered.connect(self._toggle_terminal)
-        view_menu.addAction(toggle_terminal_action)
+        view_menu.addAction(self.toggle_sidebar_action)
+        view_menu.addAction(self.toggle_fullscreen_action)
+        view_menu.addAction(self.toggle_terminal_action)
 
         # --- Outros Menus (Placeholders) ---
         menu_bar.addMenu("&Ferramentas")
-        menu_bar.addMenu("&Ajuda")
+        help_menu = menu_bar.addMenu("&Ajuda")
+        help_menu.addAction(self.show_help_action)
 
         # --- Menu Plugins (Dinâmico) ---
         self.plugins_menu = menu_bar.addMenu("&Plugins")
+
+    def _create_actions(self):
+        """Cria todas as QActions globais para centralizar a lógica."""
+        # --- File Actions ---
+        self.new_file_action = QAction("Novo Arquivo", self)
+        self.new_file_action.setShortcut(QKeySequence("Ctrl+N"))
+        self.new_file_action.triggered.connect(self._create_new_file)
+
+        self.open_folder_action = QAction("Abrir Pasta...", self)
+        self.open_folder_action.triggered.connect(self._open_folder_dialog)
+
+        self.save_action = QAction("Salvar", self)
+        self.save_action.setShortcut(QKeySequence.StandardKey.Save)
+        self.save_action.setEnabled(False)
+        self.save_action.triggered.connect(lambda: self.command_registry.execute("file.save"))
+
+        self.save_as_action = QAction("Salvar Como...", self)
+        self.save_as_action.triggered.connect(lambda: self.command_registry.execute("file.save_as"))
+
+        # --- Edit Actions ---
+        self.undo_action = QAction("Desfazer", self)
+        self.undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+        self.undo_action.triggered.connect(lambda: self.command_registry.execute("edit.undo"))
+
+        self.redo_action = QAction("Refazer", self)
+        self.redo_action.setShortcut(QKeySequence.StandardKey.Redo)
+        self.redo_action.triggered.connect(lambda: self.command_registry.execute("edit.redo"))
+
+        # --- View Actions ---
+        self.toggle_sidebar_action = QAction("Alternar Barra Lateral", self)
+        self.toggle_sidebar_action.setShortcut(QKeySequence("Ctrl+B"))
+        self.toggle_sidebar_action.triggered.connect(self._toggle_sidebar)
+
+        self.toggle_terminal_action = QAction("Alternar Terminal", self)
+        self.toggle_terminal_action.setShortcut(QKeySequence("Ctrl+`"))
+        self.toggle_terminal_action.triggered.connect(self._toggle_terminal)
+
+        self.toggle_fullscreen_action = QAction("Tela Cheia", self)
+        self.toggle_fullscreen_action.setCheckable(True)
+        self.toggle_fullscreen_action.triggered.connect(lambda checked: self.showFullScreen() if checked else self.showNormal())
+
+        # --- Help Actions ---
+        self.show_help_action = QAction("Guia de Atalhos", self)
+        self.show_help_action.setShortcut(QKeySequence("F1"))
+        self.show_help_action.triggered.connect(self._show_help_overlay)
+
+        # Adiciona ações à janela para que os atalhos sejam globais
+        self.addActions([
+            self.new_file_action, self.save_action, self.undo_action, self.redo_action,
+            self.toggle_sidebar_action, self.toggle_terminal_action, self.show_help_action
+        ])
 
     def _register_core_commands(self):
         """Registra os comandos fundamentais do editor."""
@@ -231,6 +250,8 @@ class JCodeMainWindow(QMainWindow):
         # Registra comandos básicos
         self.command_palette.register_command("Editor: Toggle Sidebar", lambda: self.sidebar.setVisible(not self.sidebar.isVisible()))
         self.command_palette.register_command("File: Save", lambda: print("Save triggered"))
+        self.command_palette.register_command("File: New File", self._create_new_file)
+        self.command_palette.register_command("File: New Folder", self._create_new_folder)
         self.command_palette.register_command("File: Open Folder", self._open_folder_dialog)
         self.command_palette.register_command("View: Toggle Terminal", self._toggle_terminal)
 
@@ -268,7 +289,32 @@ class JCodeMainWindow(QMainWindow):
         self._on_buffer_modified()
 
     def _toggle_terminal(self):
-        self.terminal.setVisible(not self.terminal.isVisible())
+        print("DEBUG: Atalho Ctrl+` acionado, alternando terminal.")
+        if self.terminal is not None:
+            self.terminal.setVisible(not self.terminal.isVisible())
+
+    def _toggle_sidebar(self):
+        print("DEBUG: Atalho Ctrl+B acionado, alternando sidebar.")
+        if self.sidebar is not None:
+            self.sidebar.setVisible(not self.sidebar.isVisible())
+
+    def _create_new_file(self):
+        print("DEBUG: Atalho Ctrl+N acionado, novo arquivo.")
+        if self.sidebar is not None:
+            self.sidebar._start_creation(is_folder=False)
+
+    def _create_new_folder(self):
+        print("DEBUG: Atalho Ctrl+Shift+N acionado, nova pasta.")
+        if self.sidebar is not None:
+            self.sidebar._start_creation(is_folder=True)
+
+    def _show_help_overlay(self):
+        """Exibe a janela de ajuda com os atalhos."""
+        print("DEBUG: Atalho F1 acionado, mostrando ajuda.")
+        all_bindings = self.input_mapper.key_bindings.copy()
+        # TODO: Adicionar atalhos globais (QAction) a este dicionário para uma lista completa.
+        help_dialog = HelpOverlay(all_bindings, self)
+        help_dialog.show()
 
     def _open_folder_dialog(self):
         """Abre diálogo para selecionar pasta."""

@@ -19,7 +19,6 @@ class InputMapper(QObject):
 
     def _load_defaults(self):
         self.key_bindings = {
-            "Ctrl+S": "file.save",
             "Up": "cursor.move_up",
             "Down": "cursor.move_down",
             "Left": "cursor.move_left",
@@ -29,7 +28,6 @@ class InputMapper(QObject):
             "Backspace": "edit.backspace",
             "Return": "edit.new_line",
             "Tab": "edit.indent",
-            "Ctrl+Shift+P": "view.command_palette",
             # Exemplo de Chord
             "Ctrl+K, Ctrl+C": "editor.comment_line"
         }
