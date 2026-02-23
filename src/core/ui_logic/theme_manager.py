@@ -27,8 +27,8 @@ class ThemeManager:
             "accent": "#007acc",
             "line_highlight": "#282828",
             "indent_guide": "#404040",
-            "bracket_match": "rgba(200, 200, 200, 0.5)",
-            "minimap_overlay": "rgba(255, 255, 255, 0.1)",
+            "bracket_match": "#C8C8C880",
+            "minimap_overlay": "#FFFFFF1A",
             "gutter_bg": "#1e1e1e",
             "gutter_fg": "#858585"
         }

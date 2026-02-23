@@ -230,7 +230,7 @@ class CodeEditor(QAbstractScrollArea):
                 match = self.buffer.get_matching_bracket(last_cursor.line, last_cursor.col)
                 if match and match[0] == line_idx:
                     bx = match[1] * self.char_width
-                    painter.fillRect(bx, y, self.char_width, self.line_height, QColor(self.theme.get_color("bracket_match")))
+                    painter.fillRect(int(bx), int(y), int(self.char_width), int(self.line_height), QColor(self.theme.get_color("bracket_match")))
             
             # Integração com Highlighter
             if self.highlighter:

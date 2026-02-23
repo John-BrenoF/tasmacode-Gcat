@@ -25,7 +25,8 @@ from src.ui.sidebar import Sidebar
 from src.ui.statusbar import StatusBar
 from src.ui.editor_group import EditorGroup
 from src.ui.command_palette import CommandPalette
-from src.ui.help_overlay import HelpOverlay
+from src.core.ui_logic.help_window import HelpWindow
+from src.core.ui_logic.shortcuts import Shortcuts
 
 class JCodeMainWindow(QMainWindow):
     """Janela principal do editor JCODE.
@@ -148,48 +149,66 @@ class JCodeMainWindow(QMainWindow):
     def _create_actions(self):
         """Cria todas as QActions globais para centralizar a lógica."""
         # --- File Actions ---
-        self.new_file_action = QAction("Novo Arquivo", self)
-        self.new_file_action.setShortcut(QKeySequence("Ctrl+N"))
+        self.new_file_action = QAction("Novo Arquivo", self) 
+        self.new_file_action.setShortcut(Shortcuts.NEW_FILE)
         self.new_file_action.triggered.connect(self._create_new_file)
 
         self.open_folder_action = QAction("Abrir Pasta...", self)
         self.open_folder_action.triggered.connect(self._open_folder_dialog)
 
         self.save_action = QAction("Salvar", self)
-        self.save_action.setShortcut(QKeySequence.StandardKey.Save)
+        self.save_action.setShortcut(Shortcuts.SAVE_FILE)
         self.save_action.setEnabled(False)
         self.save_action.triggered.connect(lambda: self.command_registry.execute("file.save"))
 
         self.save_as_action = QAction("Salvar Como...", self)
+        self.save_as_action.setShortcut(Shortcuts.SAVE_AS)
         self.save_as_action.triggered.connect(lambda: self.command_registry.execute("file.save_as"))
+        
+        self.close_tab_action = QAction("Fechar Aba", self)
+        self.close_tab_action.setShortcut(Shortcuts.CLOSE_TAB)
+        self.close_tab_action.triggered.connect(self._close_current_tab)
 
         # --- Edit Actions ---
         self.undo_action = QAction("Desfazer", self)
-        self.undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+        self.undo_action.setShortcut(Shortcuts.UNDO)
         self.undo_action.triggered.connect(lambda: self.command_registry.execute("edit.undo"))
 
         self.redo_action = QAction("Refazer", self)
-        self.redo_action.setShortcut(QKeySequence.StandardKey.Redo)
+        self.redo_action.setShortcut(Shortcuts.REDO)
         self.redo_action.triggered.connect(lambda: self.command_registry.execute("edit.redo"))
 
         # --- View Actions ---
         self.toggle_sidebar_action = QAction("Alternar Barra Lateral", self)
-        self.toggle_sidebar_action.setShortcut(QKeySequence("Ctrl+B"))
+        self.toggle_sidebar_action.setShortcut(Shortcuts.TOGGLE_SIDEBAR)
         self.toggle_sidebar_action.triggered.connect(self._toggle_sidebar)
 
         self.toggle_fullscreen_action = QAction("Tela Cheia", self)
         self.toggle_fullscreen_action.setCheckable(True)
         self.toggle_fullscreen_action.triggered.connect(lambda checked: self.showFullScreen() if checked else self.showNormal())
+        
+        self.refresh_explorer_action = QAction("Atualizar Explorer", self)
+        self.refresh_explorer_action.setShortcut(Shortcuts.REFRESH_EXPLORER)
+        self.refresh_explorer_action.triggered.connect(self._refresh_explorer)
+        
+        self.next_tab_action = QAction("Próxima Aba", self)
+        self.next_tab_action.setShortcut(Shortcuts.NEXT_TAB)
+        self.next_tab_action.triggered.connect(self._next_tab)
+        
+        self.prev_tab_action = QAction("Aba Anterior", self)
+        self.prev_tab_action.setShortcut(Shortcuts.PREV_TAB)
+        self.prev_tab_action.triggered.connect(self._prev_tab)
 
         # --- Help Actions ---
         self.show_help_action = QAction("Guia de Atalhos", self)
-        self.show_help_action.setShortcut(QKeySequence("F1"))
-        self.show_help_action.triggered.connect(self._show_help_overlay)
+        self.show_help_action.setShortcut(Shortcuts.HELP)
+        self.show_help_action.triggered.connect(self._show_help_window)
 
         # Adiciona ações à janela para que os atalhos sejam globais
         self.addActions([
             self.new_file_action, self.save_action, self.undo_action, self.redo_action,
-            self.toggle_sidebar_action, self.show_help_action
+            self.toggle_sidebar_action, self.show_help_action, self.close_tab_action,
+            self.refresh_explorer_action, self.next_tab_action, self.prev_tab_action
         ])
 
     def _register_core_commands(self):
@@ -231,7 +250,7 @@ class JCodeMainWindow(QMainWindow):
         """Registra comandos e atalhos."""
         # Atalho para Paleta de Comandos
         action = QAction("Command Palette", self)
-        action.setShortcut(QKeySequence("Ctrl+Shift+P"))
+        action.setShortcut(Shortcuts.COMMAND_PALETTE)
         action.triggered.connect(self.command_palette.show_palette)
         self.addAction(action)
         
@@ -290,13 +309,34 @@ class JCodeMainWindow(QMainWindow):
         if self.sidebar is not None:
             self.sidebar._start_creation(is_folder=True)
 
-    def _show_help_overlay(self):
-        """Exibe a janela de ajuda com os atalhos."""
-        print("DEBUG: Atalho F1 acionado, mostrando ajuda.")
-        all_bindings = self.input_mapper.key_bindings.copy()
-        # TODO: Adicionar atalhos globais (QAction) a este dicionário para uma lista completa.
-        help_dialog = HelpOverlay(all_bindings, self)
-        help_dialog.show()
+    def _show_help_window(self):
+        """Exibe a janela de ajuda sólida."""
+        help_win = HelpWindow(self)
+        help_win.exec()
+
+    def _close_current_tab(self):
+        """Fecha a aba atual com segurança."""
+        current_idx = self.editor_group.tab_widget.currentIndex()
+        if current_idx != -1:
+            self.editor_group.close_tab(current_idx)
+
+    def _refresh_explorer(self):
+        """Atualiza a árvore de arquivos na sidebar."""
+        if self.sidebar:
+            self.sidebar._refresh_tree()
+            self.custom_statusbar.showMessage("Explorer atualizado.", 3000)
+
+    def _next_tab(self):
+        idx = self.editor_group.tab_widget.currentIndex()
+        count = self.editor_group.tab_widget.count()
+        if count > 1:
+            self.editor_group.tab_widget.setCurrentIndex((idx + 1) % count)
+
+    def _prev_tab(self):
+        idx = self.editor_group.tab_widget.currentIndex()
+        count = self.editor_group.tab_widget.count()
+        if count > 1:
+            self.editor_group.tab_widget.setCurrentIndex((idx - 1) % count)
 
     def _open_folder_dialog(self):
         """Abre diálogo para selecionar pasta."""
