@@ -71,6 +71,14 @@ class InputMapper(QObject):
         
         text = event.text()
         if text and text.isprintable() and not (has_ctrl or has_alt):
+            # Auto-pairing logic
+            pairing_map = {'(': '()', '[': '[]', '{': '{}', '"': '""', "'": "''"}
+            if text in pairing_map:
+                # TODO: Add logic to wrap selection if it exists
+                self.registry.execute("edit.insert_pair", pairing_map[text])
+                return True
+
+            # Default character typing
             self.registry.execute("type_char", text)
             return True
 

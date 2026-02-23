@@ -50,3 +50,28 @@ class FileManager:
     def _write_sync(path: str, content: str):
         with open(path, 'w', encoding='utf-8') as f:
             f.write(content)
+
+    @staticmethod
+    def create_file(base_path: str, relative_path: str) -> str:
+        """Cria um arquivo e diretórios intermediários se necessário."""
+        full_path = os.path.join(base_path, relative_path)
+        
+        if os.path.exists(full_path):
+            raise FileExistsError(f"O arquivo '{relative_path}' já existe.")
+            
+        parent_dir = os.path.dirname(full_path)
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir)
+            
+        with open(full_path, 'w', encoding='utf-8') as f:
+            pass
+        return full_path
+
+    @staticmethod
+    def create_directory(base_path: str, relative_path: str) -> str:
+        """Cria um diretório e pais se necessário."""
+        full_path = os.path.join(base_path, relative_path)
+        if os.path.exists(full_path):
+            raise FileExistsError(f"A pasta '{relative_path}' já existe.")
+        os.makedirs(full_path)
+        return full_path

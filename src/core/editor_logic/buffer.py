@@ -115,6 +115,29 @@ class DocumentBuffer:
         self._redo_stack.clear()
         self.dirty = True
 
+    def insert_paired_text(self, pair: str) -> None:
+        """Inserts a pair of characters (e.g., "()") and places the cursor in the middle."""
+        if len(pair) != 2:
+            self.insert_text(pair)
+            return
+
+        open_char, close_char = pair[0], pair[1]
+        cursors_snapshot = copy.deepcopy(self.cursors)
+
+        sorted_cursors = sorted(
+            self.cursors,
+            key=lambda c: (c.line, c.col),
+            reverse=True
+        )
+
+        for cursor in sorted_cursors:
+            self._insert_at_single_cursor(cursor, open_char + close_char)
+            cursor.col -= len(close_char)
+            cursor.anchor_line = cursor.line
+            cursor.anchor_col = cursor.col
+
+        self.dirty = True
+
     def _insert_at_single_cursor(self, cursor: Cursor, text: str) -> None:
         """Lógica interna de inserção para um único cursor."""
         line_idx = cursor.line

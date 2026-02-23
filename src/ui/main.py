@@ -23,6 +23,7 @@ from src.core.ui_logic.viewport_controller import ViewportController
 from src.ui.editor import CodeEditor
 from src.ui.sidebar import Sidebar
 from src.ui.statusbar import StatusBar
+from src.ui.editor_group import EditorGroup
 from src.ui.command_palette import CommandPalette
 
 class JCodeMainWindow(QMainWindow):
@@ -33,10 +34,9 @@ class JCodeMainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.current_file_path = None
         
-        # --- 1. Inicialização do Core (Lógica de Negócio) ---
-        self.buffer = DocumentBuffer()
+        # Gerenciamento de múltiplos documentos
+        self.active_editor = None
         
         # --- 2. Inicialização dos Subsistemas de UI Logic ---
         self.highlighter = HighlighterEngine()
@@ -48,7 +48,7 @@ class JCodeMainWindow(QMainWindow):
         self.command_registry = CommandRegistry()
         self.input_mapper = InputMapper(self.command_registry)
         
-        self.event_handler = EventHandler(self.extension_bridge, self.buffer)
+        self.event_handler = EventHandler(self.extension_bridge, None) # Buffer será definido dinamicamente
         self.viewport_controller = ViewportController()
         
         # --- 3. Configuração da UI ---
@@ -63,19 +63,21 @@ class JCodeMainWindow(QMainWindow):
         self.theme_manager.load_theme("dark_default") # Tenta carregar tema
         self.theme_manager.apply_theme(QApplication.instance())
         self._load_extensions()
+        self._load_session()
         
         # Hook de inicialização
         self.extension_bridge.trigger_hook("on_app_start")
+
+    def closeEvent(self, event):
+        """Salva a sessão ao fechar."""
+        self._save_session()
+        event.accept()
 
     def _setup_ui(self):
         """Configura os widgets da interface."""
         # Componentes principais
         self.sidebar = Sidebar()
-        self.editor = CodeEditor()
-        
-        # Injeção de dependências no Editor
-        self.editor.set_dependencies(self.buffer, self.theme_manager, self.highlighter)
-        self.editor.set_input_mapper(self.input_mapper)
+        self.editor_group = EditorGroup()
         
         self.custom_statusbar = StatusBar()
         self.setStatusBar(self.custom_statusbar)
@@ -87,7 +89,7 @@ class JCodeMainWindow(QMainWindow):
         # Layout com Splitter (Sidebar | Editor)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.sidebar)
-        splitter.addWidget(self.editor)
+        splitter.addWidget(self.editor_group)
         
         # Define proporção inicial (20% Sidebar, 80% Editor)
         splitter.setStretchFactor(0, 1)
@@ -168,29 +170,34 @@ class JCodeMainWindow(QMainWindow):
 
     def _register_core_commands(self):
         """Registra os comandos fundamentais do editor."""
-        # Wrapper para atualizar a UI após comandos que alteram o buffer
-        def wrap_edit(func, *args):
-            func(*args)
-            self._on_buffer_modified()
+        def get_active_buffer_and_execute(func_name, *args, **kwargs):
+            """Wrapper para executar um comando no buffer ativo."""
+            if self.active_editor and self.active_editor.buffer:
+                buffer = self.active_editor.buffer
+                func = getattr(buffer, func_name)
+                func(*args, **kwargs)
+                self._on_buffer_modified()
 
         r = self.command_registry
-        b = self.buffer
         
-        r.register("type_char", lambda t: wrap_edit(b.insert_text, t))
-        r.register("edit.backspace", lambda: wrap_edit(b.delete_backspace))
-        r.register("edit.new_line", lambda: wrap_edit(b.insert_text, "\n"))
-        r.register("edit.indent", lambda: wrap_edit(b.insert_text, "    ")) # 4 spaces
+        # Comandos de Edição
+        r.register("type_char", lambda t: get_active_buffer_and_execute("insert_text", t))
+        r.register("edit.insert_pair", lambda p: get_active_buffer_and_execute("insert_paired_text", p))
+        r.register("edit.backspace", lambda: get_active_buffer_and_execute("delete_backspace"))
+        r.register("edit.new_line", lambda: get_active_buffer_and_execute("insert_text", "\n"))
+        r.register("edit.indent", lambda: get_active_buffer_and_execute("insert_text", "    "))
         
-        r.register("cursor.move_up", lambda: (b.move_cursors(-1, 0), self._on_buffer_modified()))
-        r.register("cursor.move_down", lambda: (b.move_cursors(1, 0), self._on_buffer_modified()))
-        r.register("cursor.move_left", lambda: (b.move_cursors(0, -1), self._on_buffer_modified()))
-        r.register("cursor.move_right", lambda: (b.move_cursors(0, 1), self._on_buffer_modified()))
+        # Comandos de Cursor
+        r.register("cursor.move_up", lambda: get_active_buffer_and_execute("move_cursors", -1, 0))
+        r.register("cursor.move_down", lambda: get_active_buffer_and_execute("move_cursors", 1, 0))
+        r.register("cursor.move_left", lambda: get_active_buffer_and_execute("move_cursors", 0, -1))
+        r.register("cursor.move_right", lambda: get_active_buffer_and_execute("move_cursors", 0, 1))
+        r.register("cursor.add_up", lambda: get_active_buffer_and_execute("add_cursor_relative", -1))
+        r.register("cursor.add_down", lambda: get_active_buffer_and_execute("add_cursor_relative", 1))
         
-        r.register("cursor.add_up", lambda: (b.add_cursor_relative(-1), self._on_buffer_modified()))
-        r.register("cursor.add_down", lambda: (b.add_cursor_relative(1), self._on_buffer_modified()))
-        
-        r.register("edit.undo", lambda: (self.buffer.undo(), self._on_buffer_modified()))
-        r.register("edit.redo", lambda: (self.buffer.redo(), self._on_buffer_modified()))
+        # Comandos de Histórico
+        r.register("edit.undo", lambda: get_active_buffer_and_execute("undo"))
+        r.register("edit.redo", lambda: get_active_buffer_and_execute("redo"))
         
         r.register("view.command_palette", self.command_palette.show_palette)
         r.register("file.save", self._save_file)
@@ -212,10 +219,10 @@ class JCodeMainWindow(QMainWindow):
     def _setup_logic_connections(self):
         """Conecta a lógica de UI aos widgets."""
         # Instala o filtro de eventos no editor
-        self.event_handler.install_on(self.editor)
+        # self.event_handler.install_on(self.editor_group) # O filtro agora é por editor
         
         # Conecta o controlador de viewport ao editor
-        self.viewport_controller.attach_to(self.editor)
+        # self.viewport_controller.attach_to(self.editor) # Será conectado por aba
         
         # Exemplo de conexão de sinal: Atualizar statusbar ao scrollar
         self.viewport_controller.visible_lines_changed.connect(
@@ -224,14 +231,23 @@ class JCodeMainWindow(QMainWindow):
         
         # CONEXÃO BIDIRECIONAL:
         # Conecta o sinal de modificação do buffer a um slot que atualiza a UI
-        self.event_handler.buffer_modified.connect(self._on_buffer_modified)
+        # self.event_handler.buffer_modified.connect(self._on_buffer_modified) # Não mais global
         
         # Conexões da Sidebar
         self.sidebar.open_folder_clicked.connect(self._open_folder_dialog)
         self.sidebar.file_clicked.connect(self._open_file)
-        
-        # Inicializa o editor com o texto do buffer
-        self._on_buffer_modified() # Usar o mesmo método para a carga inicial
+        self.sidebar.file_created.connect(self._open_file)
+        self.sidebar.status_message.connect(self.custom_statusbar.showMessage)
+
+        # Conexão do EditorGroup
+        self.editor_group.active_editor_changed.connect(self._on_active_editor_changed)
+
+    def _on_active_editor_changed(self, editor_widget):
+        self.active_editor = editor_widget
+        if editor_widget:
+            self.event_handler.buffer = editor_widget.buffer
+            self.viewport_controller.attach_to(editor_widget)
+        self._on_buffer_modified()
 
     def _open_folder_dialog(self):
         """Abre diálogo para selecionar pasta."""
@@ -240,65 +256,92 @@ class JCodeMainWindow(QMainWindow):
             self.sidebar.set_root_path(folder)
 
     def _save_file(self):
-        if not self.current_file_path:
+        if not self.active_editor:
+            return
+
+        file_path = self.active_editor.property("file_path")
+        if not file_path:
             self._save_file_as()
             return
         
-        content = self.buffer.get_text()
+        content = self.active_editor.buffer.get_text()
         # Usando a versão síncrona do FileManager para simplicidade
-        FileManager._write_sync(self.current_file_path, content)
-        self.buffer.dirty = False
+        FileManager._write_sync(file_path, content)
+        self.active_editor.buffer.dirty = False
         self._on_buffer_modified()
-        self.custom_statusbar.showMessage(f"Arquivo salvo: {self.current_file_path}", 3000)
+        self.custom_statusbar.showMessage(f"Arquivo salvo: {file_path}", 3000)
 
     def _save_file_as(self):
+        if not self.active_editor:
+            return
+
         path, _ = QFileDialog.getSaveFileName(self, "Salvar Como...")
         if path:
-            self.current_file_path = path
+            self.active_editor.setProperty("file_path", path)
             self._save_file()
 
     def _open_file(self, path):
         """Abre um arquivo selecionado na sidebar."""
+        # Verifica se o arquivo já está aberto
+        for i in range(self.editor_group.tab_widget.count()):
+            editor = self.editor_group.tab_widget.widget(i)
+            if isinstance(editor, CodeEditor) and editor.property("file_path") == path:
+                self.editor_group.tab_widget.setCurrentIndex(i)
+                return
+
         # Usando a versão síncrona do FileManager para simplicidade na UI
         try:
             content = FileManager._read_sync(path, 'utf-8')
-            self.current_file_path = path
+            buffer = DocumentBuffer(content)
+            buffer.dirty = False
 
-            self.buffer = DocumentBuffer(content)
-            self.buffer.dirty = False
+            editor = CodeEditor()
+            editor.setProperty("file_path", path)
+            editor.set_dependencies(buffer, self.theme_manager, self.highlighter)
+            editor.set_input_mapper(self.input_mapper)
+            
+            # Conecta o sinal de modificação deste buffer específico
+            handler = EventHandler(self.extension_bridge, buffer)
+            handler.buffer_modified.connect(self._on_buffer_modified)
+            editor.setProperty("event_handler", handler) # Mantém referência
 
-            # Re-conecta dependências pois o objeto buffer mudou
-            self.editor.set_dependencies(self.buffer, self.theme_manager, self.highlighter)
-            self.event_handler.buffer = self.buffer
-            self._on_buffer_modified()
+            self.editor_group.add_editor(editor, path)
             self.custom_statusbar.showMessage(f"Arquivo aberto: {os.path.basename(path)}", 5000)
         except Exception as e:
             self.custom_statusbar.showMessage(f"Erro ao abrir o arquivo: {e}", 5000)
 
     def _on_buffer_modified(self):
         """Atualiza o widget CodeEditor com o conteúdo do DocumentBuffer."""
+        if not self.active_editor or not self.active_editor.buffer:
+            self.setWindowTitle("JCode")
+            self.save_action.setEnabled(False)
+            return
+
+        buffer = self.active_editor.buffer
+        file_path = self.active_editor.property("file_path")
+
         # Atualiza scrollbar caso o número de linhas tenha mudado
-        self.viewport_controller.update_scrollbar(self.buffer)
+        self.viewport_controller.update_scrollbar(buffer)
         
         # Solicita repaint
-        self.editor.viewport().update()
+        self.active_editor.viewport().update()
 
         # Atualiza título da janela para indicar modificações
         title = "JCode - "
-        base_name = os.path.basename(self.current_file_path) if self.current_file_path else "Novo Arquivo"
+        base_name = os.path.basename(file_path) if file_path else "Novo Arquivo"
         title += base_name
-        if self.buffer.dirty:
+        if buffer.dirty:
             title += "*"
         self.setWindowTitle(title)
         
         # Atualiza Status Bar
-        if self.buffer.cursors:
-            c = self.buffer.cursors[-1]
+        if buffer.cursors:
+            c = buffer.cursors[-1]
             self.custom_statusbar.update_cursor_info(c.line, c.col)
         
         # Atualiza estado da ação 'Salvar'
         if hasattr(self, 'save_action'):
-            self.save_action.setEnabled(self.buffer.dirty)
+            self.save_action.setEnabled(buffer.dirty)
         
     def _load_extensions(self):
         """Carrega plugins e conecta sinais."""
@@ -314,6 +357,30 @@ class JCodeMainWindow(QMainWindow):
         )
         
         self.extension_bridge.load_plugins(plugins_path)
+
+    def _load_session(self):
+        """Carrega a lista de arquivos da sessão anterior."""
+        session_file = os.path.join(os.path.expanduser("~"), ".jcode_session")
+        if not os.path.exists(session_file):
+            return
+        with open(session_file, 'r') as f:
+            files_to_open = [line.strip() for line in f if line.strip() and os.path.exists(line.strip())]
+        
+        for file_path in files_to_open:
+            self._open_file(file_path)
+
+    def _save_session(self):
+        """Salva a lista de arquivos abertos."""
+        session_file = os.path.join(os.path.expanduser("~"), ".jcode_session")
+        open_files = []
+        for i in range(self.editor_group.tab_widget.count()):
+            editor = self.editor_group.tab_widget.widget(i)
+            if isinstance(editor, CodeEditor):
+                file_path = editor.property("file_path")
+                if file_path:
+                    open_files.append(file_path)
+        with open(session_file, 'w') as f:
+            f.write('\n'.join(open_files))
 
 def main():
     """Ponto de entrada da aplicação."""
