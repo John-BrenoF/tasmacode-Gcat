@@ -81,3 +81,21 @@ class SessionManager:
         except (json.JSONDecodeError, KeyError) as e:
             logger.error(f"Failed to load or parse session file, using default. Error: {e}")
             return self._get_default_session()
+
+    def add_to_history(self, path: str):
+        """Adiciona um caminho ao histórico de projetos recentes e salva imediatamente."""
+        session_data = self.load_session()
+        recent_projects = session_data.get("recent_projects", [])
+        
+        if path in recent_projects:
+            recent_projects.remove(path)
+        recent_projects.insert(0, path)
+        recent_projects = recent_projects[:15]
+        
+        session_data["recent_projects"] = recent_projects
+        
+        try:
+            with open(self.session_file, 'w') as f:
+                json.dump(session_data, f, indent=4)
+        except Exception as e:
+            logger.error(f"Failed to save session history: {e}")

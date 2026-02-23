@@ -1,6 +1,6 @@
 import sys
 import os
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QSplitter, QFileDialog, QInputDialog
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QSplitter, QFileDialog, QInputDialog, QMessageBox
 from PySide6.QtGui import QKeySequence
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextCursor, QAction, QKeySequence
@@ -24,6 +24,8 @@ from src.core.ui_logic.event_handler import EventHandler
 from src.core.ui_logic.viewport_controller import ViewportController
 from src.core.search_panel import SearchPanel
 from src.core.project_launcher import ProjectLauncher
+from src.core.config_manager import ConfigManager
+from src.ui.settings_dialog import SettingsDialog
 from src.ui.editor import CodeEditor
 from src.ui.sidebar import Sidebar
 from src.ui.statusbar import StatusBar
@@ -54,6 +56,7 @@ class JCodeMainWindow(QMainWindow):
         
         self.command_registry = CommandRegistry()
         self.session_manager = SessionManager()
+        self.config_manager = ConfigManager()
         self.input_mapper = InputMapper(self.command_registry)
         
         self.event_handler = EventHandler(self.extension_bridge, None) # Buffer será definido dinamicamente
@@ -68,10 +71,15 @@ class JCodeMainWindow(QMainWindow):
         self._create_menu_bar()
         self._setup_logic_connections()
         
+        # Conecta sinal de configuração
+        self.config_manager.config_changed.connect(self._apply_config_globally)
+        
         # Carrega tema e extensões
-        self.theme_manager.load_theme("dark_default") # Tenta carregar tema
-        self.theme_manager.apply_theme(QApplication.instance())
-        self._load_session()
+        # Aplica configurações iniciais (incluindo tema e sessão)
+        self._apply_config_globally(self.config_manager.config)
+        
+        if self.config_manager.get("restore_session"):
+            self._load_session()
         self._load_extensions()
         
         # Hook de inicialização
@@ -126,7 +134,7 @@ class JCodeMainWindow(QMainWindow):
         open_file_action = QAction("Abrir Arquivo...", self)
         open_file_action.setEnabled(False) # Placeholder
         file_menu.addAction(open_file_action)
-        file_menu.addAction(self.open_folder_action)
+        file_menu.addAction(self.open_project_action)
         file_menu.addSeparator()
         file_menu.addAction(self.save_action)
         file_menu.addAction(self.save_as_action)
@@ -154,11 +162,14 @@ class JCodeMainWindow(QMainWindow):
         session_menu = menu_bar.addMenu("&Sessões")
         save_session_action = QAction("Salvar Sessão Atual", self)
         save_session_action.triggered.connect(self._save_session)
+        session_menu.addAction(self.switch_project_action)
         session_menu.addAction(save_session_action)
 
         # --- Outros Menus (Placeholders) ---
         menu_bar.addMenu("&Ferramentas")
         help_menu = menu_bar.addMenu("&Ajuda")
+        help_menu.addAction("Configurações", self._show_settings_dialog)
+        help_menu.addSeparator()
         help_menu.addAction(self.show_help_action)
 
         # --- Menu Plugins (Dinâmico) ---
@@ -171,8 +182,8 @@ class JCodeMainWindow(QMainWindow):
         self.new_file_action.setShortcut(Shortcuts.NEW_FILE)
         self.new_file_action.triggered.connect(self._create_new_file)
 
-        self.open_folder_action = QAction("Abrir Pasta...", self)
-        self.open_folder_action.triggered.connect(self._open_folder_dialog)
+        self.open_project_action = QAction("Abrir Pasta de Projeto...", self)
+        self.open_project_action.triggered.connect(self._open_project_dialog)
 
         self.save_action = QAction("Salvar", self)
         self.save_action.setShortcut(Shortcuts.SAVE_FILE)
@@ -216,6 +227,10 @@ class JCodeMainWindow(QMainWindow):
         self.rename_action.setShortcut(Shortcuts.RENAME)
         self.rename_action.triggered.connect(self._quick_rename)
 
+        self.switch_project_action = QAction("Alternar Projeto...", self)
+        self.switch_project_action.setShortcut(Shortcuts.SWITCH_PROJECT)
+        self.switch_project_action.triggered.connect(self._show_project_launcher)
+
         # --- View Actions ---
         self.toggle_sidebar_action = QAction("Alternar Barra Lateral", self)
         self.toggle_sidebar_action.setShortcut(Shortcuts.TOGGLE_SIDEBAR)
@@ -245,7 +260,7 @@ class JCodeMainWindow(QMainWindow):
         # Adiciona ações à janela para que os atalhos sejam globais
         self.addActions([
             self.new_file_action, self.save_action, self.undo_action, self.redo_action,
-            self.cut_action, self.copy_action, self.paste_action, self.find_action, self.rename_action,
+            self.cut_action, self.copy_action, self.paste_action, self.find_action, self.rename_action, self.switch_project_action,
             self.toggle_sidebar_action, self.show_help_action,
             self.close_tab_action,
             self.refresh_explorer_action, self.next_tab_action, self.prev_tab_action
@@ -319,7 +334,8 @@ class JCodeMainWindow(QMainWindow):
         self.command_palette.register_command("File: Save", lambda: print("Save triggered"))
         self.command_palette.register_command("File: New File", self._create_new_file)
         self.command_palette.register_command("File: New Folder", self._create_new_folder)
-        self.command_palette.register_command("File: Open Folder", self._open_folder_dialog)
+        self.command_palette.register_command("File: Open Folder", self._open_project_dialog)
+        self.command_palette.register_command("Preferences: Settings", self._show_settings_dialog)
 
     def _setup_logic_connections(self):
         """Conecta a lógica de UI aos widgets."""
@@ -339,7 +355,8 @@ class JCodeMainWindow(QMainWindow):
         # self.event_handler.buffer_modified.connect(self._on_buffer_modified) # Não mais global
         
         # Conexões da Sidebar
-        self.sidebar.open_folder_clicked.connect(self._open_folder_dialog)
+        self.sidebar.open_folder_clicked.connect(self._open_project_dialog)
+        self.sidebar.open_project_clicked.connect(self._open_project_dialog)
         self.sidebar.file_clicked.connect(self._open_file)
         self.sidebar.file_created.connect(self._open_file)
         self.sidebar.status_message.connect(self.custom_statusbar.showMessage)
@@ -361,6 +378,23 @@ class JCodeMainWindow(QMainWindow):
         self._on_buffer_modified()
         # Limpa os highlights de busca ao trocar de aba
         self._hide_search_panel()
+
+    def _show_settings_dialog(self):
+        dlg = SettingsDialog(self.config_manager, self.theme_manager, self)
+        dlg.exec()
+
+    def _apply_config_globally(self, config):
+        """Aplica as configurações em toda a aplicação."""
+        # 1. Tema
+        theme_name = config.get("theme", "dark_default")
+        self.theme_manager.load_theme(theme_name)
+        self.theme_manager.apply_theme(QApplication.instance())
+        
+        # 2. Editor (Propaga para todas as abas)
+        for i in range(self.editor_group.tab_widget.count()):
+            editor = self.editor_group.tab_widget.widget(i)
+            if isinstance(editor, CodeEditor):
+                editor.update_settings(config)
 
     def _toggle_sidebar(self):
         print("DEBUG: Atalho Ctrl+B acionado, alternando sidebar.")
@@ -406,9 +440,9 @@ class JCodeMainWindow(QMainWindow):
         if count > 1:
             self.editor_group.tab_widget.setCurrentIndex((idx - 1) % count)
 
-    def _open_folder_dialog(self):
-        """Abre diálogo para selecionar pasta."""
-        folder = QFileDialog.getExistingDirectory(self, "Abrir Pasta")
+    def _open_project_dialog(self):
+        """Abre diálogo para selecionar pasta de projeto."""
+        folder = QFileDialog.getExistingDirectory(self, "Abrir Pasta de Projeto")
         if folder:
             self._load_project(folder)
 
@@ -437,12 +471,41 @@ class JCodeMainWindow(QMainWindow):
         launcher.move(x, y)
         launcher.exec()
 
+    def _close_all_files(self):
+        """Fecha todos os arquivos abertos, perguntando se deseja salvar."""
+        count = self.editor_group.tab_widget.count()
+        # Itera de trás para frente para evitar problemas de índice ao fechar
+        for i in range(count - 1, -1, -1):
+            self.editor_group.tab_widget.setCurrentIndex(i)
+            editor = self.editor_group.tab_widget.widget(i)
+            
+            if isinstance(editor, CodeEditor) and editor.buffer and editor.buffer.dirty:
+                file_name = os.path.basename(editor.property("file_path") or "Untitled")
+                reply = QMessageBox.question(
+                    self, "Salvar Alterações?",
+                    f"O arquivo '{file_name}' tem alterações não salvas.\nDeseja salvar?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+                )
+                
+                if reply == QMessageBox.StandardButton.Cancel:
+                    return False
+                elif reply == QMessageBox.StandardButton.Yes:
+                    self._save_file()
+            
+            self.editor_group.close_tab(i)
+        return True
+
     def _load_project(self, path):
         """Carrega um projeto e atualiza a sessão."""
+        if not self._close_all_files():
+            return
+
         self.sidebar.set_root_path(path)
         self.search_manager.set_root_path(path)
         self.setWindowTitle(f"JCode - {os.path.basename(path)}")
-        # Salva sessão para atualizar a lista de recentes e o last_directory
+        
+        self.session_manager.add_to_history(path)
+        # Salva sessão com o novo root e lista de arquivos vazia (pois fechamos tudo)
         self.session_manager.save_session(path, [], None)
         self.custom_statusbar.showMessage(f"Projeto carregado: {path}", 3000)
 
@@ -579,6 +642,8 @@ class JCodeMainWindow(QMainWindow):
             editor.setProperty("file_path", path)
             editor.set_dependencies(buffer, self.theme_manager, self.highlighter)
             editor.set_input_mapper(self.input_mapper)
+            # Aplica configurações atuais ao novo editor
+            editor.update_settings(self.config_manager.config)
             
             # Conecta o sinal de modificação deste buffer específico
             handler = EventHandler(self.extension_bridge, buffer)

@@ -1,7 +1,7 @@
 import os
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QLineEdit, QListWidget, 
                                QListWidgetItem, QLabel, QWidget, QApplication)
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QEvent
 from PySide6.QtGui import QColor, QKeyEvent
 
 class ProjectLauncher(QDialog):
@@ -13,7 +13,6 @@ class ProjectLauncher(QDialog):
         super().__init__(parent, Qt.WindowType.FramelessWindowHint | Qt.WindowType.Popup)
         self.recent_projects = recent_projects
         self.resize(600, 400)
-        self.setAttribute(Qt.WA_TranslucentBackground)
         
         # Estilo Moderno
         self.setStyleSheet("""

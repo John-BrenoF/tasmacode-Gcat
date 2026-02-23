@@ -1,0 +1,120 @@
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, 
+                               QLabel, QSlider, QCheckBox, QComboBox, QPushButton, QDialogButtonBox)
+from PySide6.QtCore import Qt
+
+class SettingsDialog(QDialog):
+    """Janela de preferências do usuário."""
+
+    def __init__(self, config_manager, theme_manager, parent=None):
+        super().__init__(parent)
+        self.config_manager = config_manager
+        self.theme_manager = theme_manager
+        
+        # Cópia local das configurações para edição
+        self.current_config = config_manager.config.copy()
+        
+        self.setWindowTitle("Configurações")
+        self.resize(500, 400)
+        self.setStyleSheet("background-color: #252526; color: #cccccc;")
+
+        layout = QVBoxLayout(self)
+
+        # --- Abas ---
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet("""
+            QTabWidget::pane { border: 1px solid #454545; }
+            QTabBar::tab { background: #333333; color: #cccccc; padding: 8px; }
+            QTabBar::tab:selected { background: #252526; border-top: 2px solid #007acc; }
+        """)
+        
+        self.tab_editor = QWidget()
+        self.tab_interface = QWidget()
+        self.tab_system = QWidget()
+        
+        self.tabs.addTab(self.tab_editor, "Editor")
+        self.tabs.addTab(self.tab_interface, "Interface")
+        self.tabs.addTab(self.tab_system, "Sistema")
+        
+        layout.addWidget(self.tabs)
+
+        # --- Configuração da Aba Editor ---
+        editor_layout = QVBoxLayout(self.tab_editor)
+        
+        # Tamanho da Fonte
+        lbl_font = QLabel(f"Tamanho da Fonte: {self.current_config.get('font_size')}")
+        slider_font = QSlider(Qt.Orientation.Horizontal)
+        slider_font.setRange(6, 72)
+        slider_font.setValue(self.current_config.get('font_size'))
+        slider_font.valueChanged.connect(lambda v: (lbl_font.setText(f"Tamanho da Fonte: {v}"), self._update_local('font_size', v), self._apply_live()))
+        
+        # Checkboxes
+        chk_lines = QCheckBox("Mostrar Números de Linha")
+        chk_lines.setChecked(self.current_config.get('line_numbers'))
+        chk_lines.toggled.connect(lambda v: (self._update_local('line_numbers', v), self._apply_live()))
+        
+        chk_indent = QCheckBox("Auto-indentação")
+        chk_indent.setChecked(self.current_config.get('auto_indent'))
+        chk_indent.toggled.connect(lambda v: (self._update_local('auto_indent', v), self._apply_live()))
+
+        editor_layout.addWidget(lbl_font)
+        editor_layout.addWidget(slider_font)
+        editor_layout.addWidget(chk_lines)
+        editor_layout.addWidget(chk_indent)
+        editor_layout.addStretch()
+
+        # --- Configuração da Aba Interface ---
+        interface_layout = QVBoxLayout(self.tab_interface)
+        
+        lbl_theme = QLabel("Tema:")
+        combo_theme = QComboBox()
+        combo_theme.setStyleSheet("background-color: #3c3c3c; color: white; padding: 5px;")
+        themes = self.theme_manager.get_available_themes()
+        combo_theme.addItems(themes)
+        current_theme = self.current_config.get('theme')
+        if current_theme in themes:
+            combo_theme.setCurrentText(current_theme)
+        combo_theme.currentTextChanged.connect(lambda v: (self._update_local('theme', v), self._apply_live()))
+
+        interface_layout.addWidget(lbl_theme)
+        interface_layout.addWidget(combo_theme)
+        interface_layout.addStretch()
+
+        # --- Configuração da Aba Sistema ---
+        system_layout = QVBoxLayout(self.tab_system)
+        
+        chk_restore = QCheckBox("Restaurar sessão anterior ao iniciar")
+        chk_restore.setChecked(self.current_config.get('restore_session'))
+        chk_restore.toggled.connect(lambda v: self._update_local('restore_session', v))
+        
+        system_layout.addWidget(chk_restore)
+        system_layout.addStretch()
+
+        # --- Botões de Ação ---
+        btn_box = QHBoxLayout()
+        btn_apply = QPushButton("Aplicar")
+        btn_save = QPushButton("Salvar")
+        btn_cancel = QPushButton("Cancelar")
+        
+        for btn in [btn_apply, btn_save, btn_cancel]:
+            btn.setStyleSheet("background-color: #3c3c3c; color: white; padding: 6px 12px; border: 1px solid #454545;")
+        
+        btn_apply.clicked.connect(self._apply_live)
+        btn_save.clicked.connect(self._save_and_close)
+        btn_cancel.clicked.connect(self.reject)
+        
+        btn_box.addStretch()
+        btn_box.addWidget(btn_apply)
+        btn_box.addWidget(btn_save)
+        btn_box.addWidget(btn_cancel)
+        
+        layout.addLayout(btn_box)
+
+    def _update_local(self, key, value):
+        self.current_config[key] = value
+
+    def _apply_live(self):
+        self.config_manager.config_changed.emit(self.current_config)
+
+    def _save_and_close(self):
+        self.config_manager.save_config(self.current_config)
+        self.accept()

@@ -17,6 +17,8 @@ class CodeEditor(QAbstractScrollArea):
         self.theme = None
         self.highlighter = None
         self.input_mapper = None
+        self.show_line_numbers = True
+        self.auto_indent = True
         
         # Configuração de Fonte e Métricas
         # Tenta usar fontes modernas, fallback para Monospace genérico
@@ -155,6 +157,8 @@ class CodeEditor(QAbstractScrollArea):
 
     # --- Lógica do Gutter de Linhas ---
     def line_number_area_width(self):
+        if not self.show_line_numbers:
+            return 0
         """Calcula a largura necessária para exibir os números das linhas."""
         digits = 1
         if self.buffer:
@@ -166,6 +170,24 @@ class CodeEditor(QAbstractScrollArea):
     def _update_line_number_area_width(self):
         """Atualiza as margens do viewport para acomodar o gutter."""
         self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
+
+    def update_settings(self, settings: dict):
+        """Aplica configurações dinâmicas ao editor."""
+        # Fonte
+        font_size = settings.get("font_size", 12)
+        if self.font.pointSize() != font_size:
+            self.font.setPointSize(font_size)
+            self.font_metrics = QFontMetrics(self.font)
+            self.line_height = self.font_metrics.height()
+            self.char_width = self.font_metrics.horizontalAdvance(' ')
+        
+        # Preferências
+        self.show_line_numbers = settings.get("line_numbers", True)
+        self.auto_indent = settings.get("auto_indent", True)
+        
+        # Recalcula layout
+        self._update_line_number_area_width()
+        self.viewport().update()
 
     def line_number_area_paint_event(self, event):
         """Desenha os números das linhas."""

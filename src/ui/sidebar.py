@@ -11,6 +11,7 @@ class Sidebar(QWidget):
     
     # Sinais para desacoplar a lógica
     open_folder_clicked = Signal()
+    open_project_clicked = Signal()
     file_clicked = Signal(str) # Envia o caminho do arquivo
     file_created = Signal(str) # Novo arquivo criado
     status_message = Signal(str, int) # Mensagem para statusbar (msg, timeout)
@@ -33,13 +34,16 @@ class Sidebar(QWidget):
         self.btn_new_file = self._create_action_btn(QStyle.StandardPixmap.SP_FileIcon, "Novo Arquivo")
         self.btn_new_folder = self._create_action_btn(QStyle.StandardPixmap.SP_DirIcon, "Nova Pasta")
         self.btn_refresh = self._create_action_btn(QStyle.StandardPixmap.SP_BrowserReload, "Recarregar")
+        self.btn_open_project = self._create_action_btn(QStyle.StandardPixmap.SP_FileDialogNewFolder, "Abrir Projeto")
         
         self.btn_new_file.clicked.connect(lambda: self._start_creation(is_folder=False))
         self.btn_new_folder.clicked.connect(lambda: self._start_creation(is_folder=True))
         self.btn_refresh.clicked.connect(self._refresh_tree)
+        self.btn_open_project.clicked.connect(self.open_project_clicked.emit)
 
         tb_layout.addWidget(QLabel("EXPLORER"))
         tb_layout.addStretch()
+        tb_layout.addWidget(self.btn_open_project)
         tb_layout.addWidget(self.btn_new_file)
         tb_layout.addWidget(self.btn_new_folder)
         tb_layout.addWidget(self.btn_refresh)

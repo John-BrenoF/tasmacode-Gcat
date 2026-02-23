@@ -57,6 +57,12 @@ class ThemeManager:
             logger.warning(f"Tema '{theme_name}' não encontrado. Usando padrão.")
             self.current_theme = self._default_theme.copy()
 
+    def get_available_themes(self) -> list[str]:
+        """Retorna uma lista com os nomes dos temas disponíveis."""
+        if not os.path.exists(self.themes_dir):
+            return []
+        return sorted([f[:-5] for f in os.listdir(self.themes_dir) if f.endswith(".json")])
+
     def apply_theme(self, app: QApplication) -> None:
         """Aplica o tema atual à aplicação globalmente."""
         if not self.current_theme:
