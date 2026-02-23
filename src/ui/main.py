@@ -25,6 +25,7 @@ from src.ui.sidebar import Sidebar
 from src.ui.statusbar import StatusBar
 from src.ui.editor_group import EditorGroup
 from src.ui.command_palette import CommandPalette
+from plugins.terminal import Terminal
 
 class JCodeMainWindow(QMainWindow):
     """Janela principal do editor JCODE.
@@ -78,6 +79,7 @@ class JCodeMainWindow(QMainWindow):
         # Componentes principais
         self.sidebar = Sidebar()
         self.editor_group = EditorGroup()
+        self.terminal = Terminal()
         
         self.custom_statusbar = StatusBar()
         self.setStatusBar(self.custom_statusbar)
@@ -86,16 +88,23 @@ class JCodeMainWindow(QMainWindow):
         self._setup_commands()
         self._register_core_commands()
         
-        # Layout com Splitter (Sidebar | Editor)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self.sidebar)
-        splitter.addWidget(self.editor_group)
+        # Layout Principal (Horizontal: Sidebar | Conteúdo)
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter.addWidget(self.sidebar)
+
+        # Layout de Conteúdo (Vertical: Editor | Terminal)
+        self.content_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.content_splitter.addWidget(self.editor_group)
+        self.content_splitter.addWidget(self.terminal)
+        
+        self.main_splitter.addWidget(self.content_splitter)
         
         # Define proporção inicial (20% Sidebar, 80% Editor)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 4)
+        self.main_splitter.setStretchFactor(0, 1)
+        self.main_splitter.setStretchFactor(1, 4)
+        self.content_splitter.setStretchFactor(0, 3) # Editor maior que terminal
         
-        self.setCentralWidget(splitter)
+        self.setCentralWidget(self.main_splitter)
 
     def _create_menu_bar(self):
         """Cria e popula a barra de menu global."""
@@ -164,6 +173,11 @@ class JCodeMainWindow(QMainWindow):
         toggle_fullscreen_action.triggered.connect(lambda checked: self.showFullScreen() if checked else self.showNormal())
         view_menu.addAction(toggle_fullscreen_action)
 
+        toggle_terminal_action = QAction("Alternar Terminal", self)
+        toggle_terminal_action.setShortcut(QKeySequence("Ctrl+`"))
+        toggle_terminal_action.triggered.connect(self._toggle_terminal)
+        view_menu.addAction(toggle_terminal_action)
+
         # --- Outros Menus (Placeholders) ---
         menu_bar.addMenu("&Ferramentas")
         menu_bar.addMenu("&Ajuda")
@@ -218,6 +232,7 @@ class JCodeMainWindow(QMainWindow):
         self.command_palette.register_command("Editor: Toggle Sidebar", lambda: self.sidebar.setVisible(not self.sidebar.isVisible()))
         self.command_palette.register_command("File: Save", lambda: print("Save triggered"))
         self.command_palette.register_command("File: Open Folder", self._open_folder_dialog)
+        self.command_palette.register_command("View: Toggle Terminal", self._toggle_terminal)
 
     def _setup_logic_connections(self):
         """Conecta a lógica de UI aos widgets."""
@@ -252,11 +267,16 @@ class JCodeMainWindow(QMainWindow):
             self.viewport_controller.attach_to(editor_widget)
         self._on_buffer_modified()
 
+    def _toggle_terminal(self):
+        self.terminal.setVisible(not self.terminal.isVisible())
+
     def _open_folder_dialog(self):
         """Abre diálogo para selecionar pasta."""
         folder = QFileDialog.getExistingDirectory(self, "Abrir Pasta")
         if folder:
             self.sidebar.set_root_path(folder)
+            # Sincroniza terminal
+            self.terminal.change_directory(folder)
 
     def _save_file(self):
         if not self.active_editor:
@@ -328,6 +348,9 @@ class JCodeMainWindow(QMainWindow):
         
         # Solicita repaint
         self.active_editor.viewport().update()
+        
+        # Atualiza largura do gutter se necessário (ex: passou de 99 para 100 linhas)
+        self.active_editor._update_line_number_area_width()
 
         # Atualiza título da janela para indicar modificações
         title = "JCode - "

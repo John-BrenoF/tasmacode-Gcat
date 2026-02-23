@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import QAbstractScrollArea
 from PySide6.QtCore import Signal, Qt, QTimer, QRect, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen
+from plugins.line_number_area import LineNumberArea
 
 class CodeEditor(QAbstractScrollArea):
     """Canvas de edição de código com renderização customizada.
@@ -46,6 +47,10 @@ class CodeEditor(QAbstractScrollArea):
         
         # Estado de interação
         self._is_dragging = False
+        
+        # Gutter de Linhas
+        self.line_number_area = LineNumberArea(self)
+        self._update_line_number_area_width()
 
     def set_dependencies(self, buffer, theme_manager, highlighter):
         self.buffer = buffer
@@ -128,6 +133,46 @@ class CodeEditor(QAbstractScrollArea):
 
     def mouseReleaseEvent(self, event):
         self._is_dragging = False
+
+    # --- Lógica do Gutter de Linhas ---
+    def line_number_area_width(self):
+        """Calcula a largura necessária para exibir os números das linhas."""
+        digits = 1
+        if self.buffer:
+            digits = len(str(max(1, self.buffer.line_count)))
+        
+        space = 15 + self.char_width * digits
+        return space
+
+    def _update_line_number_area_width(self):
+        """Atualiza as margens do viewport para acomodar o gutter."""
+        self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
+
+    def line_number_area_paint_event(self, event):
+        """Desenha os números das linhas."""
+        if not self.buffer or not self.theme: return
+
+        painter = QPainter(self.line_number_area)
+        painter.fillRect(event.rect(), QColor(self.theme.get_color("gutter_bg")))
+
+        scroll_y = self.verticalScrollBar().value()
+        viewport_h = self.viewport().height()
+        
+        first_line = scroll_y // self.line_height
+        lines_visible = (viewport_h // self.line_height) + 2
+        
+        # Itera sobre as linhas visíveis
+        for i in range(lines_visible):
+            line_idx = first_line + i
+            if line_idx >= self.buffer.line_count:
+                break
+                
+            y = (line_idx * self.line_height) - scroll_y
+            
+            # Desenha o número
+            painter.setPen(QColor(self.theme.get_color("gutter_fg")))
+            painter.setFont(self.font)
+            painter.drawText(0, y, self.line_number_area.width() - 5, self.line_height, Qt.AlignmentFlag.AlignRight, str(line_idx + 1))
 
     def paintEvent(self, event):
         """Renderiza o texto e os cursores."""
@@ -229,6 +274,10 @@ class CodeEditor(QAbstractScrollArea):
     def resizeEvent(self, event):
         """Atualiza scrollbars quando a janela muda de tamanho."""
         super().resizeEvent(event)
+        
+        cr = self.contentsRect()
+        self.line_number_area.setGeometry(QRect(cr.left(), cr.top(), self.line_number_area_width(), cr.height()))
+        
         # O ViewportController cuidará dos limites, mas precisamos emitir sinal ou chamar update
         self._setup_font()
 
