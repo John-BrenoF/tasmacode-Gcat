@@ -1,6 +1,7 @@
 import sys
 import os
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QSplitter, QFileDialog
+from PySide6.QtGui import QKeySequence
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextCursor, QAction, QKeySequence
 
@@ -11,6 +12,7 @@ if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 from src.core.editor_logic.buffer import DocumentBuffer
+from src.core.editor_logic.file_manager import FileManager
 from src.core.ui_logic.extension_bridge import ExtensionBridge
 from src.core.editor_logic.highlighter_engine import HighlighterEngine
 from src.core.ui_logic.theme_manager import ThemeManager
@@ -31,6 +33,7 @@ class JCodeMainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self.current_file_path = None
         
         # --- 1. Inicialização do Core (Lógica de Negócio) ---
         self.buffer = DocumentBuffer()
@@ -53,6 +56,7 @@ class JCodeMainWindow(QMainWindow):
         self.resize(1024, 768)
         
         self._setup_ui()
+        self._create_menu_bar()
         self._setup_logic_connections()
         
         # Carrega tema e extensões
@@ -91,6 +95,77 @@ class JCodeMainWindow(QMainWindow):
         
         self.setCentralWidget(splitter)
 
+    def _create_menu_bar(self):
+        """Cria e popula a barra de menu global."""
+        menu_bar = self.menuBar()
+
+        # --- Menu Arquivo ---
+        file_menu = menu_bar.addMenu("&Arquivo")
+        
+        new_file_action = QAction("Novo Arquivo", self)
+        new_file_action.setEnabled(False) # Placeholder
+        file_menu.addAction(new_file_action)
+
+        open_file_action = QAction("Abrir Arquivo...", self)
+        open_file_action.setEnabled(False) # Placeholder
+        file_menu.addAction(open_file_action)
+
+        open_folder_action = QAction("Abrir Pasta...", self)
+        open_folder_action.triggered.connect(self._open_folder_dialog)
+        file_menu.addAction(open_folder_action)
+
+        file_menu.addSeparator()
+
+        self.save_action = QAction("Salvar", self)
+        self.save_action.setShortcut(QKeySequence.StandardKey.Save)
+        self.save_action.setEnabled(False) # Desabilitado até o buffer ficar 'dirty'
+        self.save_action.triggered.connect(lambda: self.command_registry.execute("file.save"))
+        file_menu.addAction(self.save_action)
+
+        save_as_action = QAction("Salvar Como...", self)
+        save_as_action.triggered.connect(lambda: self.command_registry.execute("file.save_as"))
+        file_menu.addAction(save_as_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QAction("Sair", self)
+        exit_action.triggered.connect(QApplication.instance().quit)
+        file_menu.addAction(exit_action)
+
+        # --- Menu Editar ---
+        edit_menu = menu_bar.addMenu("&Editar")
+        undo_action = QAction("Desfazer", self)
+        undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+        undo_action.triggered.connect(lambda: self.command_registry.execute("edit.undo"))
+        edit_menu.addAction(undo_action)
+
+        redo_action = QAction("Refazer", self)
+        redo_action.setShortcut(QKeySequence.StandardKey.Redo)
+        redo_action.triggered.connect(lambda: self.command_registry.execute("edit.redo"))
+        edit_menu.addAction(redo_action)
+
+        edit_menu.addSeparator()
+        # Placeholders para funcionalidades futuras
+        for name in ["Recortar", "Copiar", "Colar", "Localizar"]:
+            action = QAction(name, self)
+            action.setEnabled(False)
+            edit_menu.addAction(action)
+
+        # --- Menu Exibir ---
+        view_menu = menu_bar.addMenu("&Exibir")
+        toggle_sidebar_action = QAction("Alternar Barra Lateral", self)
+        toggle_sidebar_action.triggered.connect(lambda: self.sidebar.setVisible(not self.sidebar.isVisible()))
+        view_menu.addAction(toggle_sidebar_action)
+
+        toggle_fullscreen_action = QAction("Tela Cheia", self)
+        toggle_fullscreen_action.setCheckable(True)
+        toggle_fullscreen_action.triggered.connect(lambda checked: self.showFullScreen() if checked else self.showNormal())
+        view_menu.addAction(toggle_fullscreen_action)
+
+        # --- Outros Menus (Placeholders) ---
+        menu_bar.addMenu("&Ferramentas")
+        menu_bar.addMenu("&Ajuda")
+
     def _register_core_commands(self):
         """Registra os comandos fundamentais do editor."""
         # Wrapper para atualizar a UI após comandos que alteram o buffer
@@ -114,8 +189,12 @@ class JCodeMainWindow(QMainWindow):
         r.register("cursor.add_up", lambda: (b.add_cursor_relative(-1), self._on_buffer_modified()))
         r.register("cursor.add_down", lambda: (b.add_cursor_relative(1), self._on_buffer_modified()))
         
+        r.register("edit.undo", lambda: (self.buffer.undo(), self._on_buffer_modified()))
+        r.register("edit.redo", lambda: (self.buffer.redo(), self._on_buffer_modified()))
+        
         r.register("view.command_palette", self.command_palette.show_palette)
-        r.register("file.save", lambda: print("Salvar arquivo (TODO)"))
+        r.register("file.save", self._save_file)
+        r.register("file.save_as", self._save_file_as)
 
     def _setup_commands(self):
         """Registra comandos e atalhos."""
@@ -160,20 +239,41 @@ class JCodeMainWindow(QMainWindow):
         if folder:
             self.sidebar.set_root_path(folder)
 
+    def _save_file(self):
+        if not self.current_file_path:
+            self._save_file_as()
+            return
+        
+        content = self.buffer.get_text()
+        # Usando a versão síncrona do FileManager para simplicidade
+        FileManager._write_sync(self.current_file_path, content)
+        self.buffer.dirty = False
+        self._on_buffer_modified()
+        self.custom_statusbar.showMessage(f"Arquivo salvo: {self.current_file_path}", 3000)
+
+    def _save_file_as(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Salvar Como...")
+        if path:
+            self.current_file_path = path
+            self._save_file()
+
     def _open_file(self, path):
         """Abre um arquivo selecionado na sidebar."""
-        # TODO: Usar FileManager assíncrono aqui
+        # Usando a versão síncrona do FileManager para simplicidade na UI
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
+            content = FileManager._read_sync(path, 'utf-8')
+            self.current_file_path = path
+
             self.buffer = DocumentBuffer(content)
+            self.buffer.dirty = False
+
             # Re-conecta dependências pois o objeto buffer mudou
             self.editor.set_dependencies(self.buffer, self.theme_manager, self.highlighter)
             self.event_handler.buffer = self.buffer
             self._on_buffer_modified()
             self.custom_statusbar.showMessage(f"Arquivo aberto: {os.path.basename(path)}", 5000)
         except Exception as e:
-            self.custom_statusbar.showMessage(f"Erro ao abrir arquivo: {e}", 5000)
+            self.custom_statusbar.showMessage(f"Erro ao abrir o arquivo: {e}", 5000)
 
     def _on_buffer_modified(self):
         """Atualiza o widget CodeEditor com o conteúdo do DocumentBuffer."""
@@ -182,11 +282,23 @@ class JCodeMainWindow(QMainWindow):
         
         # Solicita repaint
         self.editor.viewport().update()
+
+        # Atualiza título da janela para indicar modificações
+        title = "JCode - "
+        base_name = os.path.basename(self.current_file_path) if self.current_file_path else "Novo Arquivo"
+        title += base_name
+        if self.buffer.dirty:
+            title += "*"
+        self.setWindowTitle(title)
         
         # Atualiza Status Bar
         if self.buffer.cursors:
             c = self.buffer.cursors[-1]
             self.custom_statusbar.update_cursor_info(c.line, c.col)
+        
+        # Atualiza estado da ação 'Salvar'
+        if hasattr(self, 'save_action'):
+            self.save_action.setEnabled(self.buffer.dirty)
         
     def _load_extensions(self):
         """Carrega plugins e conecta sinais."""

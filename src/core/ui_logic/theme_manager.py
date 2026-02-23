@@ -99,6 +99,21 @@ class ThemeManager:
         QSplitter::handle {{
             background-color: {sidebar};
         }}
+        /* Menu Bar Styling */
+        QMenuBar {{
+            background-color: {sidebar};
+            color: {sidebar_fg};
+        }}
+        QMenuBar::item:selected {{
+            background-color: #3e3e42;
+        }}
+        QMenu {{
+            background-color: {sidebar};
+            color: {sidebar_fg};
+        }}
+        QMenu::item:selected {{
+            background-color: #007acc;
+        }}
         """
         app.setStyleSheet(style_sheet)
 

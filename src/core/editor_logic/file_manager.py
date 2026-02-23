@@ -1,5 +1,4 @@
 import asyncio
-import aiofiles # Requer pip install aiofiles, mas faremos fallback se não existir
 import os
 import logging
 

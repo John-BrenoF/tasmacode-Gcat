@@ -28,6 +28,7 @@ class DocumentBuffer:
     def __init__(self, initial_text: str = ""):
         self._lines: List[str] = initial_text.split('\n') if initial_text else [""]
         self.cursors: List[Cursor] = [Cursor(0, 0)]
+        self.dirty = False
         
         # Pilhas de Undo/Redo
         self._undo_stack: List[Action] = []
@@ -85,6 +86,8 @@ class DocumentBuffer:
 
         # Registra ação (TODO: Implementar lógica completa de diff)
         self._undo_stack.append(Action('insert', text, cursors_snapshot, copy.deepcopy(self.cursors)))
+        self._redo_stack.clear()
+        self.dirty = True
 
     def _insert_at_single_cursor(self, cursor: Cursor, text: str) -> None:
         """Lógica interna de inserção para um único cursor."""
@@ -182,6 +185,10 @@ class DocumentBuffer:
         
         for cursor in sorted_cursors:
             self._delete_char_at(cursor)
+        
+        # TODO: Store deleted text for undo
+        self.dirty = True
+        self._redo_stack.clear()
 
     def _delete_char_at(self, cursor: Cursor) -> None:
         line = cursor.line
@@ -242,3 +249,13 @@ class DocumentBuffer:
             if abs(current_line - line) > 1000: break
             
         return None
+
+    def undo(self):
+        """Desfaz a última ação."""
+        # TODO: Implementar lógica de Undo
+        logger.warning("Funcionalidade 'Undo' não implementada.")
+
+    def redo(self):
+        """Refaz a última ação desfeita."""
+        # TODO: Implementar lógica de Redo
+        logger.warning("Funcionalidade 'Redo' não implementada.")
