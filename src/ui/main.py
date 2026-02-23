@@ -14,12 +14,15 @@ if root_dir not in sys.path:
 from src.core.editor_logic.buffer import DocumentBuffer
 from src.core.editor_logic.file_manager import FileManager
 from src.core.ui_logic.extension_bridge import ExtensionBridge
+from src.core.editor_logic.search_manager import SearchManager
 from src.core.editor_logic.highlighter_engine import HighlighterEngine
 from src.core.ui_logic.theme_manager import ThemeManager
+from src.core.session_manager import SessionManager
 from src.core.editor_logic.commands import CommandRegistry
 from src.core.ui_logic.input_mapper import InputMapper
 from src.core.ui_logic.event_handler import EventHandler
 from src.core.ui_logic.viewport_controller import ViewportController
+from src.core.search_panel import SearchPanel
 from src.ui.editor import CodeEditor
 from src.ui.sidebar import Sidebar
 from src.ui.statusbar import StatusBar
@@ -42,12 +45,14 @@ class JCodeMainWindow(QMainWindow):
         
         # --- 2. Inicialização dos Subsistemas de UI Logic ---
         self.highlighter = HighlighterEngine()
+        self.search_manager = SearchManager()
         self.extension_bridge = ExtensionBridge()
         
         themes_path = os.path.join(root_dir, "themes")
         self.theme_manager = ThemeManager(themes_path)
         
         self.command_registry = CommandRegistry()
+        self.session_manager = SessionManager()
         self.input_mapper = InputMapper(self.command_registry)
         
         self.event_handler = EventHandler(self.extension_bridge, None) # Buffer será definido dinamicamente
@@ -65,8 +70,8 @@ class JCodeMainWindow(QMainWindow):
         # Carrega tema e extensões
         self.theme_manager.load_theme("dark_default") # Tenta carregar tema
         self.theme_manager.apply_theme(QApplication.instance())
-        self._load_extensions()
         self._load_session()
+        self._load_extensions()
         
         # Hook de inicialização
         self.extension_bridge.trigger_hook("on_app_start")
@@ -89,12 +94,20 @@ class JCodeMainWindow(QMainWindow):
         self._setup_commands()
         self._register_core_commands()
         
+        # Layout de Conteúdo (Vertical: SearchPanel | EditorGroup)
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+        
+        self.search_panel = SearchPanel(self)
+        content_layout.addWidget(self.search_panel)
+        content_layout.addWidget(self.editor_group)
+        
         # Layout Principal (Horizontal: Sidebar | Conteúdo)
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.addWidget(self.sidebar)
-
-        # Layout de Conteúdo (Apenas Editor agora)
-        self.main_splitter.addWidget(self.editor_group)
+        self.main_splitter.addWidget(content_widget)
         
         # Define proporção inicial (20% Sidebar, 80% Editor)
         self.main_splitter.setStretchFactor(0, 1)
@@ -138,6 +151,12 @@ class JCodeMainWindow(QMainWindow):
         view_menu.addAction(self.toggle_sidebar_action)
         view_menu.addAction(self.toggle_fullscreen_action)
 
+        # --- Menu Sessões ---
+        session_menu = menu_bar.addMenu("&Sessões")
+        save_session_action = QAction("Salvar Sessão Atual", self)
+        save_session_action.triggered.connect(self._save_session)
+        session_menu.addAction(save_session_action)
+
         # --- Outros Menus (Placeholders) ---
         menu_bar.addMenu("&Ferramentas")
         help_menu = menu_bar.addMenu("&Ajuda")
@@ -178,6 +197,10 @@ class JCodeMainWindow(QMainWindow):
         self.redo_action.setShortcut(Shortcuts.REDO)
         self.redo_action.triggered.connect(lambda: self.command_registry.execute("edit.redo"))
 
+        self.find_action = QAction("Localizar", self)
+        self.find_action.setShortcut(Shortcuts.FIND)
+        self.find_action.triggered.connect(self._show_search_panel)
+
         # --- View Actions ---
         self.toggle_sidebar_action = QAction("Alternar Barra Lateral", self)
         self.toggle_sidebar_action.setShortcut(Shortcuts.TOGGLE_SIDEBAR)
@@ -207,7 +230,8 @@ class JCodeMainWindow(QMainWindow):
         # Adiciona ações à janela para que os atalhos sejam globais
         self.addActions([
             self.new_file_action, self.save_action, self.undo_action, self.redo_action,
-            self.toggle_sidebar_action, self.show_help_action, self.close_tab_action,
+            self.find_action, self.toggle_sidebar_action, self.show_help_action,
+            self.close_tab_action,
             self.refresh_explorer_action, self.next_tab_action, self.prev_tab_action
         ])
 
@@ -243,6 +267,7 @@ class JCodeMainWindow(QMainWindow):
         r.register("edit.redo", lambda: get_active_buffer_and_execute("redo"))
         
         r.register("view.command_palette", self.command_palette.show_palette)
+        r.register("view.find", self._show_search_panel)
         r.register("file.save", self._save_file)
         r.register("file.save_as", self._save_file_as)
 
@@ -287,12 +312,19 @@ class JCodeMainWindow(QMainWindow):
         # Conexão do EditorGroup
         self.editor_group.active_editor_changed.connect(self._on_active_editor_changed)
 
+        # Conexões do Painel de Busca
+        self.search_panel.closed.connect(self._hide_search_panel)
+        self.search_panel.find_next.connect(self._on_find)
+        self.search_panel.replace_all.connect(self._on_replace_all)
+
     def _on_active_editor_changed(self, editor_widget):
         self.active_editor = editor_widget
         if editor_widget:
             self.event_handler.buffer = editor_widget.buffer
             self.viewport_controller.attach_to(editor_widget)
         self._on_buffer_modified()
+        # Limpa os highlights de busca ao trocar de aba
+        self._hide_search_panel()
 
     def _toggle_sidebar(self):
         print("DEBUG: Atalho Ctrl+B acionado, alternando sidebar.")
@@ -343,6 +375,31 @@ class JCodeMainWindow(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, "Abrir Pasta")
         if folder:
             self.sidebar.set_root_path(folder)
+            # Salva como último diretório aberto na sessão
+            self.session_manager.save_session(folder, [], None)
+
+    def _show_search_panel(self):
+        if self.active_editor:
+            self.search_panel.show_panel()
+
+    def _hide_search_panel(self):
+        self.search_panel.hide()
+        if self.active_editor:
+            self.active_editor.search_highlights = []
+            self.active_editor.viewport().update()
+
+    def _on_find(self, text, case_sensitive):
+        if not self.active_editor or not text:
+            self._hide_search_panel()
+            return
+        highlights = self.search_manager.find_all(self.active_editor.buffer, text, case_sensitive)
+        self.active_editor.search_highlights = highlights
+        self.active_editor.viewport().update()
+
+    def _on_replace_all(self, find_text, replace_text, case_sensitive):
+        if self.active_editor and find_text:
+            self.search_manager.replace_all(self.active_editor.buffer, find_text, replace_text, case_sensitive)
+            self._on_buffer_modified()
 
     def _save_file(self):
         if not self.active_editor:
@@ -404,6 +461,7 @@ class JCodeMainWindow(QMainWindow):
         if not self.active_editor or not self.active_editor.buffer:
             self.setWindowTitle("JCode")
             self.save_action.setEnabled(False)
+            self.find_action.setEnabled(False)
             return
 
         buffer = self.active_editor.buffer
@@ -434,6 +492,7 @@ class JCodeMainWindow(QMainWindow):
         # Atualiza estado da ação 'Salvar'
         if hasattr(self, 'save_action'):
             self.save_action.setEnabled(buffer.dirty)
+        self.find_action.setEnabled(True)
         
     def _load_extensions(self):
         """Carrega plugins e conecta sinais."""
@@ -485,27 +544,72 @@ class JCodeMainWindow(QMainWindow):
 
     def _load_session(self):
         """Carrega a lista de arquivos da sessão anterior."""
-        session_file = os.path.join(os.path.expanduser("~"), ".jcode_session")
-        if not os.path.exists(session_file):
-            return
-        with open(session_file, 'r') as f:
-            files_to_open = [line.strip() for line in f if line.strip() and os.path.exists(line.strip())]
+        session_data = self.session_manager.load_session()
         
-        for file_path in files_to_open:
-            self._open_file(file_path)
+        # 1. Recupera e valida o diretório de trabalho
+        root_path = session_data.get("last_directory")
+        if root_path and os.path.exists(root_path) and os.path.isdir(root_path):
+            self.sidebar.set_root_path(root_path)
+            self.search_manager.set_root_path(root_path)
+            self.setWindowTitle(f"JCode - {os.path.basename(root_path)}")
+        else:
+            root_path = None
+
+        # 2. Abre os arquivos e restaura cursores
+        files_to_open = session_data.get("open_files", [])
+        for file_data in files_to_open:
+            path = file_data.get("path")
+            if path:
+                # Reconstrói caminho absoluto se necessário
+                if root_path and not os.path.isabs(path):
+                    path = os.path.join(root_path, path)
+                
+                if os.path.exists(path):
+                    self._open_file(path)
+                    
+                    # Restaura posição do cursor
+                    cursor_info = file_data.get("cursor")
+                    if cursor_info and self.active_editor:
+                        self.active_editor.buffer.update_last_cursor(
+                            cursor_info.get("line", 0), 
+                            cursor_info.get("col", 0)
+                        )
+                        self.active_editor.viewport().update()
+
+        # 3. Restaura a aba ativa
+        active_file = session_data.get("active_file")
+        if active_file:
+            if root_path and not os.path.isabs(active_file):
+                active_file = os.path.join(root_path, active_file)
+            
+            for i in range(self.editor_group.tab_widget.count()):
+                editor = self.editor_group.tab_widget.widget(i)
+                if isinstance(editor, CodeEditor) and editor.property("file_path") == active_file:
+                    self.editor_group.tab_widget.setCurrentIndex(i)
+                    break
 
     def _save_session(self):
         """Salva a lista de arquivos abertos."""
-        session_file = os.path.join(os.path.expanduser("~"), ".jcode_session")
         open_files = []
         for i in range(self.editor_group.tab_widget.count()):
             editor = self.editor_group.tab_widget.widget(i)
             if isinstance(editor, CodeEditor):
                 file_path = editor.property("file_path")
                 if file_path:
-                    open_files.append(file_path)
-        with open(session_file, 'w') as f:
-            f.write('\n'.join(open_files))
+                    cursor = editor.buffer.cursors[-1]
+                    open_files.append({
+                        'path': file_path, 
+                        'cursor': {'line': cursor.line, 'col': cursor.col}
+                    })
+        
+        # Determina o root_path baseado no estado da Sidebar
+        root_path = None
+        if self.sidebar.stack.currentWidget() == self.sidebar.tree:
+            root_path = self.sidebar.file_model.rootPath()
+            
+        active_path = self.active_editor.property("file_path") if self.active_editor else None
+        
+        self.session_manager.save_session(root_path, open_files, active_path)
 
     def _on_active_editor_changed(self, editor_widget):
         self.active_editor = editor_widget

@@ -101,6 +101,7 @@ class Sidebar(QWidget):
     def set_root_path(self, path: str):
         """Define a pasta raiz da árvore."""
         self.stack.setCurrentWidget(self.tree)
+        self.file_model.setRootPath(path)
         self.tree.setRootIndex(self.file_model.index(path))
 
     def _on_tree_double_click(self, index):

@@ -48,6 +48,9 @@ class CodeEditor(QAbstractScrollArea):
         # Estado de interação
         self._is_dragging = False
         
+        # Destaques da busca
+        self.search_highlights = []
+        
         # Gutter de Linhas
         self.line_number_area = LineNumberArea(self)
         self._update_line_number_area_width()
@@ -187,6 +190,8 @@ class CodeEditor(QAbstractScrollArea):
         fg_color = QColor(self.theme.get_color("foreground"))
         hl_line_color = QColor(self.theme.get_color("line_highlight"))
         guide_color = QColor(self.theme.get_color("indent_guide"))
+        search_hl_color = QColor(self.theme.get_color("accent"))
+        search_hl_color.setAlpha(80) # Semi-transparente
         
         # Preenche fundo
         painter.fillRect(event.rect(), bg_color)
@@ -212,6 +217,13 @@ class CodeEditor(QAbstractScrollArea):
             # 1. Active Line Highlight
             if line_idx in active_lines:
                 painter.fillRect(0, y, self.viewport().width(), self.line_height, hl_line_color)
+            
+            # 0. Search Highlights (desenhado antes do texto)
+            for hl_line, hl_col, hl_len in self.search_highlights:
+                if hl_line == line_idx:
+                    hl_x = hl_col * self.char_width
+                    hl_w = hl_len * self.char_width
+                    painter.fillRect(int(hl_x), int(y), int(hl_w), self.line_height, search_hl_color)
             
             # 2. Indent Guides
             # Desenha linhas verticais a cada 4 espaços (assumindo tab_width=4)

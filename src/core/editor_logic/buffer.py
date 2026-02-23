@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict
+import logging
 import copy
 
 @dataclass
@@ -17,6 +18,9 @@ class Cursor:
     def as_tuple(self) -> Tuple[int, int]:
         return (self.line, self.col)
 
+    def copy(self):
+        return Cursor(self.line, self.col, self.anchor_line, self.anchor_col)
+
 @dataclass
 class Action:
     """Representa uma ação para o sistema de Undo/Redo."""
@@ -24,7 +28,10 @@ class Action:
     text: str
     cursors_before: List[Cursor]
     cursors_after: List[Cursor]
+    # For full text replacement
+    text_before: Optional[str] = None
 
+logger = logging.getLogger("DocumentBuffer")
 class DocumentBuffer:
     """Gerencia o documento como uma lista de linhas e múltiplos cursores.
     
@@ -136,6 +143,17 @@ class DocumentBuffer:
             cursor.anchor_line = cursor.line
             cursor.anchor_col = cursor.col
 
+        self.dirty = True
+
+    def replace_full_text(self, text_before: str, text_after: str, cursors_before: List[Cursor]):
+        """Replaces the entire buffer content, creating a single undo action."""
+        self._lines = text_after.split('\n')
+        # Reset cursor to a safe position
+        self.cursors = [Cursor(0, 0)]
+        
+        action = Action('replace_all', text_after, cursors_before, self.cursors, text_before=text_before)
+        self._undo_stack.append(action)
+        self._redo_stack.clear()
         self.dirty = True
 
     def _insert_at_single_cursor(self, cursor: Cursor, text: str) -> None:
@@ -301,10 +319,30 @@ class DocumentBuffer:
 
     def undo(self):
         """Desfaz a última ação."""
-        # TODO: Implementar lógica de Undo
-        logger.warning("Funcionalidade 'Undo' não implementada.")
+        if not self._undo_stack:
+            return
+
+        action = self._undo_stack.pop()
+        
+        if action.type == 'insert':
+            # This requires a proper 'delete' implementation which is complex.
+            logger.warning("Undo for simple insertion is not fully implemented.")
+            self._undo_stack.append(action) # Put it back
+            return
+        elif action.type == 'replace_all':
+            self._lines = action.text_before.split('\n')
+            self.cursors = action.cursors_before
+            
+        self._redo_stack.append(action)
+        self.dirty = True
 
     def redo(self):
         """Refaz a última ação desfeita."""
-        # TODO: Implementar lógica de Redo
-        logger.warning("Funcionalidade 'Redo' não implementada.")
+        if not self._redo_stack:
+            return
+
+        action = self._redo_stack.pop()
+        self._lines = action.text.split('\n')
+        self.cursors = action.cursors_after
+        self._undo_stack.append(action)
+        self.dirty = True
