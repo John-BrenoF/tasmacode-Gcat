@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, Q
 from PySide6.QtGui import QKeySequence
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextCursor, QAction, QKeySequence
-
+from PySide6.QtCore import QDir
 # Ajuste de Path para garantir que imports funcionem a partir da raiz
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, "../../"))
@@ -31,6 +31,7 @@ from src.ui.sidebar import Sidebar
 from src.ui.statusbar import StatusBar
 from src.ui.editor_group import EditorGroup
 from src.ui.command_palette import CommandPalette
+from src.ui.video_player import VideoPlayer
 from src.core.ui_logic.help_window import HelpWindow
 from src.core.ui_logic.shortcuts import Shortcuts
 
@@ -128,6 +129,10 @@ class JCodeMainWindow(QMainWindow):
         """Cria e popula a barra de menu global."""
         menu_bar = self.menuBar()
 
+
+        def _create_new_session():
+            print("Criar nova sessão")
+
         # --- Menu Arquivo ---
         file_menu = menu_bar.addMenu("&Arquivo")
         file_menu.addAction(self.new_file_action)
@@ -139,6 +144,7 @@ class JCodeMainWindow(QMainWindow):
         file_menu.addAction(self.save_action)
         file_menu.addAction(self.save_as_action)
         file_menu.addSeparator()
+
 
         exit_action = QAction("Sair", self)
         exit_action.triggered.connect(QApplication.instance().quit)
@@ -160,12 +166,16 @@ class JCodeMainWindow(QMainWindow):
 
         # --- Menu Sessões ---
         session_menu = menu_bar.addMenu("&Sessões")
+        create_new_session_action = QAction("Criar nova sessão", self)
+        create_new_session_action.triggered.connect(self._new_session)
+        session_menu.addAction(create_new_session_action)
         save_session_action = QAction("Salvar Sessão Atual", self)
         save_session_action.triggered.connect(self._save_session)
         session_menu.addAction(self.switch_project_action)
         session_menu.addAction(save_session_action)
 
         # --- Outros Menus (Placeholders) ---
+
         menu_bar.addMenu("&Ferramentas")
         help_menu = menu_bar.addMenu("&Ajuda")
         help_menu.addAction("Configurações", self._show_settings_dialog)
@@ -320,6 +330,21 @@ class JCodeMainWindow(QMainWindow):
         r.register("edit.rename", self._quick_rename)
         r.register("file.save", self._save_file)
         r.register("file.save_as", self._save_file_as)
+
+    def _new_session(self):
+        """Cria uma nova sessão, fechando todos os arquivos e limpando o projeto."""
+        if self._close_all_files():
+            # Limpa o projeto atual
+            self.sidebar.set_root_path(QDir.homePath())
+            self._open_project_dialog()
+            self.setWindowTitle("JCode - Nova Sessão")
+
+            # Limpa a sessão
+            self.session_manager.save_session(None, [], None)
+            self.custom_statusbar.showMessage("Nova sessão iniciada.", 3000)
+        else:
+            # Cancelado pelo usuário
+            self.custom_statusbar.showMessage("Ação de nova sessão cancelada.", 3000)
 
     def _setup_commands(self):
         """Registra comandos e atalhos."""
@@ -631,9 +656,15 @@ class JCodeMainWindow(QMainWindow):
         # Verifica se o arquivo já está aberto
         for i in range(self.editor_group.tab_widget.count()):
             editor = self.editor_group.tab_widget.widget(i)
-            if isinstance(editor, CodeEditor) and editor.property("file_path") == path:
+            if editor.property("file_path") == path:
                 self.editor_group.tab_widget.setCurrentIndex(i)
                 return
+
+        # Verifica se é arquivo de mídia
+        _, ext = os.path.splitext(path)
+        if ext.lower() in ['.mp4', '.avi', '.mkv', '.mov', '.webm', '.mp3']:
+            self._open_media_file(path)
+            return
 
         # Usando a versão síncrona do FileManager para simplicidade na UI
         try:
@@ -664,6 +695,17 @@ class JCodeMainWindow(QMainWindow):
             self.custom_statusbar.flash_message(f"Arquivo aberto: {os.path.basename(path)}", color="#007acc")
         except Exception as e:
             self.custom_statusbar.flash_message(f"Erro ao abrir: {e}", color="#dc3545")
+
+    def _open_media_file(self, path):
+        try:
+            player = VideoPlayer()
+            player.load_file(path)
+            player.setProperty("file_path", path)
+            
+            self.editor_group.add_editor(player, path)
+            self.custom_statusbar.flash_message(f"Mídia aberta: {os.path.basename(path)}", color="#007acc")
+        except Exception as e:
+            self.custom_statusbar.flash_message(f"Erro ao abrir mídia: {e}", color="#dc3545")
 
     def _on_buffer_modified(self):
 
@@ -909,6 +951,7 @@ class JCodeMainWindow(QMainWindow):
             self.viewport_controller.attach_to(editor_widget)
 
         self._on_buffer_modified()
+
 
 def main():
     """Ponto de entrada da aplicação."""
