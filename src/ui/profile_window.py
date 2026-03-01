@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, 
-                               QHBoxLayout, QMessageBox, QFrame, QApplication, QListWidget, QListWidgetItem, QWidget, QProgressBar, QFileDialog, QComboBox, QMenu)
+                               QHBoxLayout, QMessageBox, QFrame, QApplication, QListWidget, QListWidgetItem, QWidget, QProgressBar, QFileDialog, QComboBox, QMenu, QStyle, QCheckBox)
 from PySide6.QtCore import Qt, QThread, Signal, QSize
 from PySide6.QtGui import QPixmap, QColor
 from src.core.git_logic import GitLogic
@@ -13,6 +13,50 @@ class RepoLoaderThread(QThread):
         self.auth_logic = auth_logic
     def run(self):
         self.loaded.emit(self.auth_logic.get_user_repos())
+
+class NewRepoDialog(QDialog):
+    """Diálogo para criar um novo repositório."""
+    def __init__(self, theme, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Novo Repositório")
+        self.resize(400, 250)
+        
+        bg = theme.get("background", "#252526")
+        fg = theme.get("foreground", "#cccccc")
+        input_bg = theme.get("sidebar_bg", "#3c3c3c")
+        border = theme.get("border_color", "#454545")
+        accent = theme.get("accent", "#007acc")
+        
+        self.setStyleSheet(f"background-color: {bg}; color: {fg};")
+        
+        layout = QVBoxLayout(self)
+        
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("Nome do Repositório")
+        self.name_input.setStyleSheet(f"background-color: {input_bg}; border: 1px solid {border}; padding: 6px; color: {fg}; border-radius: 4px;")
+        
+        self.desc_input = QLineEdit()
+        self.desc_input.setPlaceholderText("Descrição (Opcional)")
+        self.desc_input.setStyleSheet(f"background-color: {input_bg}; border: 1px solid {border}; padding: 6px; color: {fg}; border-radius: 4px;")
+        
+        self.chk_private = QCheckBox("Privado")
+        self.chk_private.setStyleSheet(f"color: {fg}; spacing: 5px;")
+        
+        btn_create = QPushButton("Criar Repositório")
+        btn_create.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_create.setStyleSheet(f"background-color: {accent}; color: white; padding: 8px; border: none; border-radius: 4px; font-weight: bold;")
+        btn_create.clicked.connect(self.accept)
+        
+        layout.addWidget(QLabel("Nome:"))
+        layout.addWidget(self.name_input)
+        layout.addWidget(QLabel("Descrição:"))
+        layout.addWidget(self.desc_input)
+        layout.addWidget(self.chk_private)
+        layout.addStretch()
+        layout.addWidget(btn_create)
+        
+    def get_data(self):
+        return self.name_input.text().strip(), self.desc_input.text().strip(), self.chk_private.isChecked()
 
 class RepoItemWidget(QWidget):
     """Widget retangular para exibir informações do repositório."""
@@ -49,8 +93,24 @@ class RepoItemWidget(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(5)
         
+        # Header (Nome + Ícone Privado)
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(5)
+
         name_lbl = QLabel(repo_data.get("name", "Unknown"))
         name_lbl.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {accent};")
+        header_layout.addWidget(name_lbl)
+
+        if repo_data.get("private"):
+            lock_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserSecure)
+            lock_lbl = QLabel()
+            lock_lbl.setPixmap(lock_icon.pixmap(12, 12))
+            lock_lbl.setToolTip("Privado")
+            header_layout.addWidget(lock_lbl)
+        
+        header_layout.addStretch()
+        layout.addLayout(header_layout)
         
         desc_text = repo_data.get("description") or "Sem descrição"
         if len(desc_text) > 60: desc_text = desc_text[:57] + "..."
@@ -58,7 +118,6 @@ class RepoItemWidget(QWidget):
         desc_lbl.setStyleSheet(f"color: {fg}; font-size: 12px;")
         desc_lbl.setWordWrap(True)
         
-        layout.addWidget(name_lbl)
         layout.addWidget(desc_lbl)
 
 class ProfileWindow(QDialog):
@@ -185,11 +244,17 @@ class ProfileWindow(QDialog):
         
         self.sort_combo = QComboBox()
         self.sort_combo.addItems(["Atualização (Recente)", "Nome (A-Z)"])
-        self.sort_combo.setStyleSheet(f"background-color: {sidebar_bg}; color: {fg}; border: 1px solid {border}; padding: 2px;")
+        self.sort_combo.setStyleSheet(f"background-color: {sidebar_bg}; color: {fg}; border: 1px solid {border}; padding: 2px; min-width: 100px;")
         self.sort_combo.currentIndexChanged.connect(self._update_repo_list)
+        
+        btn_new_repo = QPushButton("+ Novo")
+        btn_new_repo.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_new_repo.setStyleSheet(f"background-color: {self.theme.get('accent', '#007acc')}; color: white; border: none; border-radius: 4px; padding: 4px 10px;")
+        btn_new_repo.clicked.connect(self._show_new_repo_dialog)
         
         repo_header_layout.addWidget(lbl_repos)
         repo_header_layout.addStretch()
+        repo_header_layout.addWidget(btn_new_repo)
         repo_header_layout.addWidget(QLabel("Ordenar:"))
         repo_header_layout.addWidget(self.sort_combo)
         
@@ -312,6 +377,18 @@ class ProfileWindow(QDialog):
         action_open.triggered.connect(lambda: webbrowser.open(repo.get("html_url", "")))
         
         menu.exec(self.repo_list.mapToGlobal(pos))
+
+    def _show_new_repo_dialog(self):
+        dlg = NewRepoDialog(self.theme, self)
+        if dlg.exec():
+            name, desc, private = dlg.get_data()
+            if name:
+                success, msg = self.auth_logic.create_repository(name, desc, private)
+                if success:
+                    QMessageBox.information(self, "Sucesso", msg)
+                    self._load_repos() # Recarrega a lista
+                else:
+                    QMessageBox.critical(self, "Erro", msg)
 
     def _handle_login(self):
         token = self.token_input.text().strip()

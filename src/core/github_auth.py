@@ -114,3 +114,32 @@ class GithubAuth(QObject):
         except Exception as e:
             logger.error(f"Erro ao buscar repositórios: {e}")
             return []
+
+    def create_repository(self, name: str, description: str, private: bool) -> tuple[bool, str]:
+        """Cria um novo repositório no GitHub."""
+        if not self._token:
+            return False, "Usuário não autenticado."
+            
+        headers = {
+            "Authorization": f"token {self._token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        data = {
+            "name": name,
+            "description": description,
+            "private": private,
+            "auto_init": True # Inicia com README para facilitar o clone imediato
+        }
+        
+        try:
+            response = requests.post("https://api.github.com/user/repos", headers=headers, json=data, timeout=10)
+            if response.status_code == 201:
+                return True, "Repositório criado com sucesso!"
+            else:
+                try:
+                    err_msg = response.json().get("message", "Erro desconhecido")
+                except:
+                    err_msg = response.text
+                return False, f"Erro ao criar: {err_msg}"
+        except Exception as e:
+            return False, f"Erro de conexão: {str(e)}"
