@@ -72,6 +72,7 @@ class Sidebar(QWidget):
         # Estado 2: Árvore de Arquivos
         self.file_model = QFileSystemModel()
         self.file_model.setRootPath(QDir.homePath())
+        self.file_model.setReadOnly(False) # Permite operações de escrita (Drag & Drop)
         
         self.tree = QTreeView()
         self.tree.setModel(self.file_model)
@@ -80,6 +81,15 @@ class Sidebar(QWidget):
         self.tree.setColumnHidden(1, True) # Size
         self.tree.setColumnHidden(2, True) # Type
         self.tree.setColumnHidden(3, True) # Date
+        
+        # Configuração de Drag and Drop
+        self.tree.setSelectionMode(QTreeView.SelectionMode.ExtendedSelection)
+        self.tree.setDragEnabled(True)
+        self.tree.setAcceptDrops(True)
+        self.tree.setDropIndicatorShown(True)
+        self.tree.setDragDropMode(QTreeView.DragDropMode.DragDrop)
+        self.tree.setDefaultDropAction(Qt.DropAction.MoveAction)
+        
         self.tree.doubleClicked.connect(self._on_tree_double_click)
         
         # Menu de Contexto
