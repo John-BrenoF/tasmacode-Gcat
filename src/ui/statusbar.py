@@ -1,8 +1,11 @@
 from PySide6.QtWidgets import QStatusBar, QLabel, QPushButton, QWidget, QHBoxLayout, QStyle, QMenu
-from PySide6.QtCore import Qt, QTimer, QSize
+from PySide6.QtCore import Qt, QTimer, QSize, Signal
 
 class StatusBar(QStatusBar):
     """Barra de status customizada."""
+
+    live_server_toggle_requested = Signal(bool)
+
     def __init__(self, parent=None):
         self.theme = None
         super().__init__(parent)
@@ -42,11 +45,27 @@ class StatusBar(QStatusBar):
         self.btn_bell.setStyleSheet("border: none;")
         self.btn_bell.setCursor(Qt.CursorShape.PointingHandCursor)
 
+        # Botão do Live Server
+        self.btn_live_server = QPushButton("Live Server")
+        self.btn_live_server.setFlat(True)
+        self.btn_live_server.setCheckable(True)
+        self.btn_live_server.setStyleSheet("color: white; border: none; padding: 0 5px;")
+        self.btn_live_server.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_live_server.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaStop))
+        self.btn_live_server.toggled.connect(self.live_server_toggle_requested.emit)
+
+        # Link do Live Server
+        self.lbl_live_link = QLabel("")
+        self.lbl_live_link.setOpenExternalLinks(True)
+        self.lbl_live_link.hide()
+
         # Adiciona ao layout
         self.right_layout.addWidget(self.lbl_cursor)
         self.right_layout.addWidget(self.lbl_indent)
         self.right_layout.addWidget(self.lbl_encoding)
         self.right_layout.addWidget(self.btn_lang)
+        self.right_layout.addWidget(self.lbl_live_link)
+        self.right_layout.addWidget(self.btn_live_server)
         self.right_layout.addWidget(self.btn_bell)
 
         self.addPermanentWidget(self.right_container)
@@ -76,6 +95,23 @@ class StatusBar(QStatusBar):
 
     def update_lang(self, lang):
         self.btn_lang.setText(lang)
+
+    def set_live_server_state(self, running: bool, host: str = "", port: int = 0):
+        """Atualiza a aparência do botão do live server."""
+        self.btn_live_server.blockSignals(True)
+        self.btn_live_server.setChecked(running)
+        if running:
+            self.btn_live_server.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+            self.btn_live_server.setToolTip(f"Servidor rodando em http://{host}:{port}")
+            
+            url = f"http://{host}:{port}"
+            self.lbl_live_link.setText(f"<a href='{url}' style='color: #4da6ff; text-decoration: none;'>{url}</a>")
+            self.lbl_live_link.show()
+        else:
+            self.btn_live_server.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaStop))
+            self.btn_live_server.setToolTip("Iniciar Live Server")
+            self.lbl_live_link.hide()
+        self.btn_live_server.blockSignals(False)
 
     def flash_message(self, text, color="#28a745", duration=2000):
         """Exibe uma mensagem com cor de fundo temporária (Feedback Visual)."""

@@ -1,14 +1,14 @@
 {
-    "background": "#282a36",
+    "background": "#000000",
     "foreground": "#f8f8f2",
     "selection": "#44475a",
-    "sidebar_bg": "#21222C",
-    "statusbar_bg": "#6272a4",
+    "sidebar_bg": "#000000",
+    "statusbar_bg": "#000000",
     "accent": "#ff79c6",
-    "line_highlight": "#44475a",
+    "line_highlight": "#1a1a1a",
     "indent_guide": "#44475a",
     "bracket_match": "#f8f8f2",
     "minimap_overlay": "#6272a4",
-    "gutter_bg": "#282a36",
+    "gutter_bg": "#000000",
     "gutter_fg": "#6272a4"
 }

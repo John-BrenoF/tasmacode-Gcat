@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, 
-                               QLabel, QSlider, QCheckBox, QComboBox, QPushButton, QDialogButtonBox, QLineEdit)
+                               QLabel, QSlider, QCheckBox, QComboBox, QPushButton, QDialogButtonBox, QLineEdit, QSpinBox)
 from PySide6.QtCore import Qt
 
 class SettingsDialog(QDialog):
@@ -94,6 +94,20 @@ class SettingsDialog(QDialog):
         # --- Configuração da Aba Rede ---
         network_layout = QVBoxLayout(self.tab_network)
         
+        # Live Server Settings
+        lbl_ls_title = QLabel("Live Server:")
+        lbl_ls_title.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        
+        chk_ls_browser = QCheckBox("Abrir navegador automaticamente ao iniciar")
+        chk_ls_browser.setChecked(self.current_config.get('live_server_open_browser', True))
+        chk_ls_browser.toggled.connect(lambda v: self._update_local('live_server_open_browser', v))
+
+        lbl_ls_port = QLabel("Porta (0 = Automático):")
+        spin_ls_port = QSpinBox()
+        spin_ls_port.setRange(0, 65535)
+        spin_ls_port.setValue(self.current_config.get('live_server_port', 0))
+        spin_ls_port.valueChanged.connect(lambda v: self._update_local('live_server_port', v))
+
         lbl_server = QLabel("Endereço do Servidor Local:")
         self.txt_server = QLineEdit()
         self.txt_server.setPlaceholderText("ex: http://127.0.0.1:5000")
@@ -105,6 +119,10 @@ class SettingsDialog(QDialog):
         lbl_note.setStyleSheet("font-style: italic; color: #808080; font-size: 11px; margin-top: 5px;")
         lbl_note.setWordWrap(True)
         
+        network_layout.addWidget(lbl_ls_title)
+        network_layout.addWidget(chk_ls_browser)
+        network_layout.addWidget(lbl_ls_port)
+        network_layout.addWidget(spin_ls_port)
         network_layout.addWidget(lbl_server)
         network_layout.addWidget(self.txt_server)
         network_layout.addWidget(lbl_note)

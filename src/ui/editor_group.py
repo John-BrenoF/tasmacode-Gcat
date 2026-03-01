@@ -1,4 +1,5 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTabWidget, QLabel
+from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtCore import Qt, Signal
 from .editor import CodeEditor
 import os
@@ -25,9 +26,42 @@ class EditorGroup(QWidget):
         self._show_placeholder()
 
     def _show_placeholder(self):
-        """Displays a placeholder when no files are open."""
-        self.placeholder = QLabel("Abra um arquivo ou pasta para começar")
-        self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        """Exibe um placeholder com um ícone e texto de boas-vindas."""
+        placeholder_widget = QWidget()
+        placeholder_layout = QVBoxLayout(placeholder_widget)
+        placeholder_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder_layout.setSpacing(20)
+
+        # --- Ícone SVG ---
+        icon_path = '/home/johnb/JCODE/icon/JCODE.svg'
+
+        if os.path.exists(icon_path):
+            svg_widget = QSvgWidget(icon_path)
+            svg_widget.setFixedSize(650, 510)
+            placeholder_layout.addWidget(svg_widget)
+        else:
+            icon_missing_label = QLabel(f"[Ícone não encontrado: {icon_path}]")
+            icon_missing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            placeholder_layout.addWidget(icon_missing_label)
+
+        # --- Título ---
+        titulo_label = QLabel(" ")
+        titulo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder_layout.addWidget(titulo_label)
+
+        # --- Dicas ---
+        dicas = [
+            "                 Ctrl + B →          Mostrar/Ocultar barra lateral",
+            "                 Ctrl + S →          Salvar",
+            "                 F1 →                 Ajuda"
+        ]
+
+        for dica in dicas:
+            dica_label = QLabel(dica)
+            dica_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+            placeholder_layout.addWidget(dica_label)
+
+        self.placeholder = placeholder_widget
         self.tab_widget.addTab(self.placeholder, "")
         self.tab_widget.setTabsClosable(False)
 

@@ -1,9 +1,10 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, QLineEdit,
                                QTreeView, QFileSystemModel, QHBoxLayout, 
-                               QStackedWidget, QFrame, QStyle)
+                               QStackedWidget, QFrame, QStyle, QMenu, QMessageBox, QInputDialog)
 from PySide6.QtCore import Qt, Signal, QDir, QEvent
 from PySide6.QtGui import QIcon
 import os
+import shutil
 from src.core.editor_logic.file_manager import FileManager
 
 class Sidebar(QWidget):
@@ -81,6 +82,10 @@ class Sidebar(QWidget):
         self.tree.setColumnHidden(3, True) # Date
         self.tree.doubleClicked.connect(self._on_tree_double_click)
         
+        # Menu de Contexto
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._show_context_menu)
+        
         self.stack.addWidget(self.tree)
         
         # --- Inline Input para Criação ---
@@ -93,6 +98,9 @@ class Sidebar(QWidget):
         # Estado interno
         self._creating_folder = False
         self._creation_base_path = ""
+        
+        # Clipboard interno para arquivos
+        self._clipboard_path = None
 
     def _create_action_btn(self, icon_std, tooltip):
         btn = QPushButton()
@@ -187,3 +195,92 @@ class Sidebar(QWidget):
                 self.input_edit.hide()
                 return True
         return super().eventFilter(obj, event)
+
+    def _show_context_menu(self, position):
+        index = self.tree.indexAt(position)
+        if not index.isValid():
+            return
+
+        path = self.file_model.filePath(index)
+        menu = QMenu()
+
+        # Ações de Arquivo
+        rename_action = menu.addAction("Renomear")
+        rename_action.triggered.connect(lambda: self._rename_item(path))
+
+        delete_action = menu.addAction("Excluir")
+        delete_action.triggered.connect(lambda: self._delete_item(path))
+
+        menu.addSeparator()
+
+        copy_action = menu.addAction("Copiar")
+        copy_action.triggered.connect(lambda: self._copy_item(path))
+
+        paste_action = menu.addAction("Colar")
+        # Habilita colar apenas se houver algo na área de transferência e o destino for válido
+        paste_action.setEnabled(bool(self._clipboard_path and os.path.exists(self._clipboard_path)))
+        paste_action.triggered.connect(lambda: self._paste_item(path))
+
+        menu.exec(self.tree.viewport().mapToGlobal(position))
+
+    def _rename_item(self, path):
+        old_name = os.path.basename(path)
+        dir_path = os.path.dirname(path)
+        
+        new_name, ok = QInputDialog.getText(self, "Renomear", "Novo nome:", text=old_name)
+        if ok and new_name and new_name != old_name:
+            new_path = os.path.join(dir_path, new_name)
+            try:
+                os.rename(path, new_path)
+                self.status_message.emit(f"Renomeado para: {new_name}", 3000)
+            except Exception as e:
+                QMessageBox.critical(self, "Erro", f"Erro ao renomear: {e}")
+
+    def _delete_item(self, path):
+        name = os.path.basename(path)
+        reply = QMessageBox.question(self, "Excluir", f"Tem certeza que deseja excluir '{name}'?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+                self.status_message.emit(f"Excluído: {name}", 3000)
+            except Exception as e:
+                QMessageBox.critical(self, "Erro", f"Erro ao excluir: {e}")
+
+    def _copy_item(self, path):
+        self._clipboard_path = path
+        self.status_message.emit(f"Copiado: {os.path.basename(path)}", 2000)
+
+    def _paste_item(self, target_path):
+        if not self._clipboard_path or not os.path.exists(self._clipboard_path):
+            return
+
+        # Se o alvo for um arquivo, cola na pasta pai
+        if os.path.isfile(target_path):
+            dest_dir = os.path.dirname(target_path)
+        else:
+            dest_dir = target_path
+
+        src_name = os.path.basename(self._clipboard_path)
+        dest_path = os.path.join(dest_dir, src_name)
+
+        # Evita sobrescrever: adiciona sufixo se necessário
+        if os.path.exists(dest_path):
+            base, ext = os.path.splitext(src_name)
+            counter = 1
+            while os.path.exists(dest_path):
+                dest_path = os.path.join(dest_dir, f"{base}_copy{counter}{ext}")
+                counter += 1
+
+        try:
+            if os.path.isdir(self._clipboard_path):
+                shutil.copytree(self._clipboard_path, dest_path)
+            else:
+                shutil.copy2(self._clipboard_path, dest_path)
+            self.status_message.emit(f"Colado: {os.path.basename(dest_path)}", 3000)
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao colar: {e}")

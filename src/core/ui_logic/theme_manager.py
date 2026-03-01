@@ -19,26 +19,26 @@ class ThemeManager:
         self.current_theme: Dict[str, Any] = {}
         # Tema padrão de fallback
         self._default_theme = {
-            "background": "#1e1e1e",
-            "foreground": "#d4d4d4",
-            "selection": "#264f78",
-            "sidebar_bg": "#252526",
-            "statusbar_bg": "#007acc",
-            "accent": "#007acc",
-            "line_highlight": "#282828",
-            "indent_guide": "#404040",
-            "bracket_match": "#C8C8C880",
-            "minimap_overlay": "#FFFFFF1A",
-            "gutter_bg": "#1e1e1e",
-            "gutter_fg": "#858585",
+            "background": "#282a36",
+            "foreground": "#f8f8f2",
+            "selection": "#44475a",
+            "sidebar_bg": "#21222c",
+            "statusbar_bg": "#21222c",
+            "accent": "#ff79c6",
+            "line_highlight": "#44475a70",
+            "indent_guide": "#6272a4",
+            "bracket_match": "#f8f8f2",
+            "minimap_overlay": "#44475a70",
+            "gutter_bg": "#282a36",
+            "gutter_fg": "#6272a4",
             # Syntax Highlighting Defaults
-            "keyword_color": "#569cd6",   # Azul VSCode
-            "builtin_color": "#569cd6",
-            "string_color": "#ce9178",    # Laranja suave
-            "comment_color": "#6a9955",   # Verde
-            "class_color": "#4ec9b0",     # Verde água
-            "function_color": "#dcdcaa",  # Amarelo claro
-            "operator_color": "#d4d4d4"
+            "keyword_color": "#ff79c6",
+            "builtin_color": "#8be9fd",
+            "string_color": "#f1fa8c",
+            "comment_color": "#6272a4",
+            "class_color": "#50fa7b",
+            "function_color": "#50fa7b",
+            "operator_color": "#ff79c6"
         }
 
     def load_theme(self, theme_name: str) -> None:
@@ -48,7 +48,9 @@ class ThemeManager:
         if os.path.exists(theme_path):
             try:
                 with open(theme_path, 'r') as f:
-                    self.current_theme = json.load(f)
+                    loaded_data = json.load(f)
+                    self.current_theme = self._default_theme.copy()
+                    self.current_theme.update(loaded_data)
                 logger.info(f"Tema '{theme_name}' carregado com sucesso.")
             except Exception as e:
                 logger.error(f"Erro ao carregar tema '{theme_name}': {e}")
@@ -74,13 +76,16 @@ class ThemeManager:
         sidebar = self.current_theme.get("sidebar_bg", "#252526")
         sidebar_fg = "#cccccc"
         status = self.current_theme.get("statusbar_bg", "#007acc")
+        accent = self.current_theme.get("accent", "#007acc")
+        selection = self.current_theme.get("selection", "#44475a")
+        line_highlight = self.current_theme.get("line_highlight", "#2a2d2e")
         
         # Gera o QSS Global
         style_sheet = f"""
         QMainWindow {{
             background-color: {bg};
         }}
-        QPlainTextEdit {{
+        QPlainTextEdit, QAbstractScrollArea {{
             background-color: {bg};
             color: {fg};
             border: none;
@@ -94,10 +99,10 @@ class ThemeManager:
             border: none;
         }}
         QTreeView::item:hover {{
-            background-color: #2a2d2e;
+            background-color: {line_highlight};
         }}
         QTreeView::item:selected {{
-            background-color: #37373d;
+            background-color: {selection};
             color: white;
         }}
         /* Sidebar Buttons */
@@ -107,7 +112,7 @@ class ThemeManager:
             color: {sidebar_fg};
         }}
         QPushButton#SidebarAction:hover {{
-            background-color: #3e3e42;
+            background-color: {selection};
         }}
         QStatusBar {{
             background-color: {status};
@@ -122,14 +127,40 @@ class ThemeManager:
             color: {sidebar_fg};
         }}
         QMenuBar::item:selected {{
-            background-color: #3e3e42;
+            background-color: {selection};
         }}
         QMenu {{
             background-color: {sidebar};
             color: {sidebar_fg};
         }}
         QMenu::item:selected {{
-            background-color: #007acc;
+            background-color: {accent};
+        }}
+        /* ScrollBar Styling */
+        QScrollBar:vertical {{
+            border: none;
+            background: {sidebar};
+            width: 14px;
+            margin: 0px 0px 0px 0px;
+        }}
+        QScrollBar::handle:vertical {{
+            background: {selection};
+            min-height: 20px;
+            border-radius: 7px;
+        }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+            border: none;
+            background: none;
+        }}
+        QScrollBar:horizontal {{
+            height: 14px;
+            background: {sidebar};
+            border: none;
+        }}
+        QScrollBar::handle:horizontal {{
+            background: {selection};
+            min-width: 20px;
+            border-radius: 7px;
         }}
         """
         app.setStyleSheet(style_sheet)

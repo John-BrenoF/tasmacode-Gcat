@@ -38,6 +38,9 @@ from src.core.ui_logic.help_window import HelpWindow
 from src.core.ui_logic.shortcuts import Shortcuts
 from src.core.ui_logic.about_info import AboutInfo
 from src.ui.about_window import AboutWindow
+from src.ui.store_window import StoreWindow
+from src.ui.theme_editor_dialog import ThemeEditorDialog
+from src.serv_live.live_server_manager import LiveServerManager
 
 class JCodeMainWindow(QMainWindow):
     """Janela principal do editor JCODE.
@@ -64,6 +67,7 @@ class JCodeMainWindow(QMainWindow):
         self.config_manager = ConfigManager()
         self.input_mapper = InputMapper(self.command_registry)
         
+        self.live_server_manager = LiveServerManager()
         self.event_handler = EventHandler(self.extension_bridge, None) # Buffer será definido dinamicamente
         self.viewport_controller = ViewportController()
         
@@ -180,7 +184,13 @@ class JCodeMainWindow(QMainWindow):
 
         # --- Outros Menus (Placeholders) ---
 
-        menu_bar.addMenu("&Ferramentas")
+        tools_menu = menu_bar.addMenu("&Ferramentas")
+        self.store_action = QAction("Store", self)
+        self.store_action.triggered.connect(self._show_store_dialog)
+        self.theme_editor_action = QAction("Editor de Temas", self)
+        self.theme_editor_action.triggered.connect(self._show_theme_editor)
+        tools_menu.addAction(self.theme_editor_action)
+        tools_menu.addAction(self.store_action)
         help_menu = menu_bar.addMenu("&Ajuda")
         help_menu.addAction("Configurações", self._show_settings_dialog)
         help_menu.addSeparator()
@@ -403,6 +413,12 @@ class JCodeMainWindow(QMainWindow):
         self.search_panel.replace_one.connect(self._on_replace_one)
         self.search_panel.replace_all.connect(self._on_replace_all)
 
+        # Conexões do Live Server
+        self.custom_statusbar.live_server_toggle_requested.connect(self._on_live_server_toggle)
+        self.live_server_manager.server_started.connect(self._on_live_server_started)
+        self.live_server_manager.server_stopped.connect(self._on_live_server_stopped)
+        self.live_server_manager.error.connect(lambda msg: self.custom_statusbar.flash_message(msg, color="#dc3545"))
+
     def _on_active_editor_changed(self, editor_widget):
         self.active_editor = editor_widget
         if editor_widget:
@@ -451,10 +467,24 @@ class JCodeMainWindow(QMainWindow):
         help_win = HelpWindow(self)
         help_win.exec()
 
+    def _show_store_dialog(self):
+        """Abre a janela da loja de plugins."""
+        dialog = StoreWindow(root_dir, self)
+        dialog.exec()
+
     def _show_about_dialog(self):
         info = AboutInfo()
         dlg = AboutWindow(info, root_dir, self)
         dlg.exec()
+
+    def _show_theme_editor(self):
+        """Abre o editor de temas visual."""
+        dialog = ThemeEditorDialog(self.theme_manager, self)
+        # Conecta o sinal para o preview ao vivo
+        dialog.theme_updated.connect(self._apply_config_globally)
+        dialog.exec()
+        # Restaura o tema salvo após fechar o diálogo
+        self._apply_config_globally(self.config_manager.config)
 
     def _close_current_tab(self):
         """Fecha a aba atual com segurança."""
@@ -511,6 +541,33 @@ class JCodeMainWindow(QMainWindow):
         y = geo.y() + 100
         launcher.move(x, y)
         launcher.exec()
+
+    def _on_live_server_toggle(self, start: bool):
+        """Inicia ou para o live server baseado no clique do botão."""
+        if start:
+            root_path = self.sidebar.file_model.rootPath()
+            if not root_path or root_path == QDir.homePath():
+                self.custom_statusbar.flash_message("Abra uma pasta de projeto para iniciar o servidor.", color="#dc3545")
+                self.custom_statusbar.set_live_server_state(False)
+                return
+            
+            port = self.config_manager.get("live_server_port")
+            open_browser = self.config_manager.get("live_server_open_browser")
+            self.live_server_manager.start(root_path, port=port, open_browser=open_browser)
+        else:
+            self.live_server_manager.stop()
+
+    def _on_live_server_started(self, host: str, port: int):
+        """Callback para quando o servidor é iniciado com sucesso."""
+        self.custom_statusbar.set_live_server_state(True, host, port)
+        self.custom_statusbar.flash_message(f"Live Server iniciado em http://{host}:{port}", color="#28a745")
+
+    def _on_live_server_stopped(self):
+        """Callback para quando o servidor é parado."""
+        self.custom_statusbar.set_live_server_state(False)
+        self.custom_statusbar.flash_message("Live Server parado.", color="#007acc")
+
+
 
     def _close_all_files(self):
         """Fecha todos os arquivos abertos, perguntando se deseja salvar."""

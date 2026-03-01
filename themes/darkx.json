@@ -1,0 +1,18 @@
+{
+    "background": "#141317",
+    "foreground": "#e8e6eb",
+    "selection": "#2a2730",
+    "sidebar_bg": "#18161c",
+    "statusbar_bg": "#18161c",
+    "accent": "#a277ff",
+
+    "line_highlight": "#1f1c24",
+    "indent_guide": "#2c2833",
+    "bracket_match": "#a277ff55",
+    "minimap_overlay": "#a277ff18",
+
+    "gutter_bg": "#121015",
+    "gutter_fg": "#9a94a6",
+
+    "border_color": "#000000"
+}

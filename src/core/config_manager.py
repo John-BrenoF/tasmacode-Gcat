@@ -22,7 +22,9 @@ class ConfigManager(QObject):
             "auto_indent": True,
             "theme": "dark_default",
             "restore_session": True,
-            "server_address": "http://localhost:5000"
+            "server_address": "http://localhost:5000",
+            "live_server_port": 0,
+            "live_server_open_browser": True
         }
         self.config = self.load_config()
 
