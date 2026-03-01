@@ -1,6 +1,7 @@
 import subprocess
 import os
 import logging
+from urllib.parse import quote
 
 logger = logging.getLogger("GitLogic")
 
@@ -113,7 +114,11 @@ class GitLogic:
         protocol, rest = url.split("://", 1)
         if "@" in rest:
             rest = rest.split("@", 1)[1]
-        return f"{protocol}://{username}:{token}@{rest}"
+            
+        # Codifica username e token para lidar com caracteres especiais (ex: '@', ':')
+        safe_username = quote(username, safe='')
+        safe_token = quote(token, safe='')
+        return f"{protocol}://{safe_username}:{safe_token}@{rest}"
 
     def push(self, repo_path: str, username: str = None, token: str = None) -> tuple[bool, str]:
         try:
