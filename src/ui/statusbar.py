@@ -2,10 +2,19 @@ from PySide6.QtWidgets import QStatusBar, QLabel, QPushButton, QWidget, QHBoxLay
 from PySide6.QtCore import Qt, QTimer, QSize, Signal
 from PySide6.QtGui import QPixmap
 
+class ClickableLabel(QLabel):
+    """Label que emite sinal ao ser clicado."""
+    clicked = Signal()
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
 class StatusBar(QStatusBar):
     """Barra de status customizada."""
 
     live_server_toggle_requested = Signal(bool)
+    avatar_clicked = Signal()
 
     def __init__(self, parent=None):
         self.theme = None
@@ -21,9 +30,11 @@ class StatusBar(QStatusBar):
         self.right_layout.setSpacing(10)
         
         # Widgets
-        self.lbl_avatar = QLabel()
+        self.lbl_avatar = ClickableLabel()
         self.lbl_avatar.setFixedSize(20, 20)
         self.lbl_avatar.setStyleSheet("border-radius: 10px; background-color: #444;")
+        self.lbl_avatar.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_avatar.clicked.connect(self.avatar_clicked.emit)
         self.lbl_avatar.hide()
 
         self.lbl_cursor = self._create_label("Ln 1, Col 1", min_width=100)

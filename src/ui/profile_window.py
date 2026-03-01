@@ -1,18 +1,84 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, 
-                               QHBoxLayout, QMessageBox, QFrame, QApplication)
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
+                               QHBoxLayout, QMessageBox, QFrame, QApplication, QListWidget, QListWidgetItem, QWidget, QProgressBar, QFileDialog, QComboBox, QMenu)
+from PySide6.QtCore import Qt, QThread, Signal, QSize
+from PySide6.QtGui import QPixmap, QColor
+from src.core.git_logic import GitLogic
 import requests
+import webbrowser
+
+class RepoLoaderThread(QThread):
+    loaded = Signal(list)
+    def __init__(self, auth_logic):
+        super().__init__()
+        self.auth_logic = auth_logic
+    def run(self):
+        self.loaded.emit(self.auth_logic.get_user_repos())
+
+class RepoItemWidget(QWidget):
+    """Widget retangular para exibir informações do repositório."""
+    def __init__(self, repo_data, theme, parent=None):
+        super().__init__(parent)
+        self.setObjectName("RepoItemWidget")
+        
+        main_bg = theme.get("background", "#252526")
+        bg_color = QColor(main_bg).darker(110)
+        bg = bg_color.name()
+        hover_bg = bg_color.lighter(105).name()
+        
+        fg = theme.get("foreground", "#cccccc")
+        accent = theme.get("accent", "#007acc")
+        border = theme.get("border_color", "#454545")
+        
+        self.setStyleSheet(f"""
+            #RepoItemWidget {{
+                background-color: {bg};
+                border: 1px solid {border};
+                border-radius: 6px;
+            }}
+            #RepoItemWidget:hover {{
+                background-color: {hover_bg};
+                border: 1px solid {accent};
+            }}
+            QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(5)
+        
+        name_lbl = QLabel(repo_data.get("name", "Unknown"))
+        name_lbl.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {accent};")
+        
+        desc_text = repo_data.get("description") or "Sem descrição"
+        if len(desc_text) > 60: desc_text = desc_text[:57] + "..."
+        desc_lbl = QLabel(desc_text)
+        desc_lbl.setStyleSheet(f"color: {fg}; font-size: 12px;")
+        desc_lbl.setWordWrap(True)
+        
+        layout.addWidget(name_lbl)
+        layout.addWidget(desc_lbl)
 
 class ProfileWindow(QDialog):
     """Janela para login e visualização de perfil do GitHub."""
     
-    def __init__(self, auth_logic, parent=None):
+    def __init__(self, auth_logic, theme_manager, parent=None):
         super().__init__(parent)
         self.auth_logic = auth_logic
+        self.theme_manager = theme_manager
+        self.theme = theme_manager.current_theme
+        self.git_logic = GitLogic()
+        self.repos = []
+        
         self.setWindowTitle("Perfil GitHub")
-        self.resize(400, 350)
-        self.setStyleSheet("background-color: #252526; color: #cccccc;")
+        self.resize(600, 500)
+        
+        # Aplica cores do tema
+        bg = self.theme.get("background", "#252526")
+        fg = self.theme.get("foreground", "#cccccc")
+        self.setStyleSheet(f"background-color: {bg}; color: {fg};")
         
         self.layout = QVBoxLayout(self)
         self.layout.setSpacing(15)
@@ -25,14 +91,18 @@ class ProfileWindow(QDialog):
             self._setup_login_ui()
 
     def _setup_login_ui(self):
+        fg = self.theme.get("foreground", "#cccccc")
+        input_bg = self.theme.get("sidebar_bg", "#3c3c3c")
+        border = self.theme.get("border_color", "#454545")
+        
         lbl_title = QLabel("Login com GitHub")
-        lbl_title.setStyleSheet("font-size: 20px; font-weight: bold; color: white; margin-bottom: 10px;")
+        lbl_title.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {fg}; margin-bottom: 10px;")
         lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.layout.addWidget(lbl_title)
 
         lbl_info = QLabel("Insira seu Personal Access Token (PAT) para habilitar operações de Git (Push/Pull) sem senha.")
         lbl_info.setWordWrap(True)
-        lbl_info.setStyleSheet("color: #8b949e; margin-bottom: 10px;")
+        lbl_info.setStyleSheet(f"color: {fg}; margin-bottom: 10px; opacity: 0.8;")
         lbl_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.layout.addWidget(lbl_info)
 
@@ -40,11 +110,11 @@ class ProfileWindow(QDialog):
         self.token_input = QLineEdit()
         self.token_input.setPlaceholderText("ghp_...")
         self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.token_input.setStyleSheet("background-color: #3c3c3c; border: 1px solid #454545; padding: 10px; color: white; border-radius: 4px;")
+        self.token_input.setStyleSheet(f"background-color: {input_bg}; border: 1px solid {border}; padding: 10px; color: {fg}; border-radius: 4px;")
         
         btn_paste = QPushButton("Colar")
         btn_paste.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_paste.setStyleSheet("background-color: #3c3c3c; color: white; padding: 10px; border: 1px solid #454545; border-radius: 4px;")
+        btn_paste.setStyleSheet(f"background-color: {input_bg}; color: {fg}; padding: 10px; border: 1px solid {border}; border-radius: 4px;")
         btn_paste.clicked.connect(lambda: self.token_input.setText(QApplication.clipboard().text()))
         
         token_layout.addWidget(self.token_input)
@@ -61,12 +131,15 @@ class ProfileWindow(QDialog):
 
     def _setup_logged_in_ui(self):
         user_data = self.auth_logic.get_user_data()
+        fg = self.theme.get("foreground", "#cccccc")
+        sidebar_bg = self.theme.get("sidebar_bg", "#3c3c3c")
+        border = self.theme.get("border_color", "#454545")
         
         # Avatar
         avatar_url = user_data.get("avatar_url")
         lbl_avatar = QLabel()
         lbl_avatar.setFixedSize(120, 120)
-        lbl_avatar.setStyleSheet("border-radius: 60px; background-color: #3c3c3c; border: 2px solid #454545;")
+        lbl_avatar.setStyleSheet(f"border-radius: 60px; background-color: {sidebar_bg}; border: 2px solid {border};")
         lbl_avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         if avatar_url:
@@ -89,14 +162,64 @@ class ProfileWindow(QDialog):
         # Info
         name = user_data.get("name") or user_data.get("login")
         lbl_name = QLabel(name)
-        lbl_name.setStyleSheet("font-size: 22px; font-weight: bold; color: white; margin-top: 10px;")
+        lbl_name.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {fg}; margin-top: 10px;")
         lbl_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.layout.addWidget(lbl_name)
 
         lbl_login = QLabel(f"@{user_data.get('login')}")
-        lbl_login.setStyleSheet("color: #8b949e; font-size: 14px;")
+        lbl_login.setStyleSheet(f"color: {fg}; font-size: 14px; opacity: 0.7;")
         lbl_login.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.layout.addWidget(lbl_login)
+
+        # Repositórios
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        self.layout.addWidget(line)
+
+        # Header Repositórios (Label + Sort)
+        repo_header_layout = QHBoxLayout()
+        
+        lbl_repos = QLabel("Repositórios Recentes:")
+        lbl_repos.setStyleSheet(f"font-weight: bold; color: {fg};")
+        
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems(["Atualização (Recente)", "Nome (A-Z)"])
+        self.sort_combo.setStyleSheet(f"background-color: {sidebar_bg}; color: {fg}; border: 1px solid {border}; padding: 2px;")
+        self.sort_combo.currentIndexChanged.connect(self._update_repo_list)
+        
+        repo_header_layout.addWidget(lbl_repos)
+        repo_header_layout.addStretch()
+        repo_header_layout.addWidget(QLabel("Ordenar:"))
+        repo_header_layout.addWidget(self.sort_combo)
+        
+        self.layout.addLayout(repo_header_layout)
+
+        # Filtro de Busca
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Filtrar repositórios...")
+        self.search_input.setStyleSheet(f"background-color: {sidebar_bg}; border: 1px solid {border}; padding: 6px; color: {fg}; border-radius: 4px;")
+        self.search_input.textChanged.connect(self._filter_repos)
+        self.layout.addWidget(self.search_input)
+
+        # Loading Indicator
+        self.loading_bar = QProgressBar()
+        self.loading_bar.setRange(0, 0) # Indeterminate
+        self.loading_bar.setStyleSheet(f"QProgressBar {{ border: none; background-color: {sidebar_bg}; height: 4px; }} QProgressBar::chunk {{ background-color: {self.theme.get('accent', '#007acc')}; }}")
+        self.layout.addWidget(self.loading_bar)
+
+        self.repo_list = QListWidget()
+        self.repo_list.setSpacing(10)
+        self.repo_list.setViewMode(QListWidget.IconMode)
+        self.repo_list.setResizeMode(QListWidget.Adjust)
+        self.repo_list.setMovement(QListWidget.Static)
+        self.repo_list.setStyleSheet("background-color: transparent; border: none;")
+        self.repo_list.itemDoubleClicked.connect(self._on_repo_double_clicked)
+        self.repo_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.repo_list.customContextMenuRequested.connect(self._show_repo_context_menu)
+        self.layout.addWidget(self.repo_list)
+        
+        self._load_repos()
 
         # Logout
         btn_logout = QPushButton("Sair")
@@ -111,6 +234,84 @@ class ProfileWindow(QDialog):
         self.layout.addLayout(h_btn)
         
         self.layout.addStretch()
+
+    def _load_repos(self):
+        self.repo_list.hide()
+        self.loading_bar.show()
+        
+        self.loader_thread = RepoLoaderThread(self.auth_logic)
+        self.loader_thread.loaded.connect(self._on_repos_loaded)
+        self.loader_thread.start()
+
+    def _on_repos_loaded(self, repos):
+        self.loading_bar.hide()
+        self.repo_list.show()
+        self.repos = repos
+        self._update_repo_list()
+
+    def _update_repo_list(self):
+        self.repo_list.clear()
+        
+        # Ordenação
+        if self.sort_combo.currentIndex() == 0: # Atualização
+            sorted_repos = sorted(self.repos, key=lambda r: r.get("updated_at", ""), reverse=True)
+        else: # Nome
+            sorted_repos = sorted(self.repos, key=lambda r: r.get("name", "").lower())
+        
+        # Calcula largura para 2 colunas (largura total / 2 - espaçamento)
+        item_width = (self.repo_list.width() // 2) - 20
+        if item_width < 200: item_width = 250
+
+        for repo in sorted_repos:
+            item = QListWidgetItem(self.repo_list)
+            item.setData(Qt.UserRole, repo)
+            widget = RepoItemWidget(repo, self.theme)
+            item.setSizeHint(QSize(item_width, 100))
+            self.repo_list.addItem(item)
+            self.repo_list.setItemWidget(item, widget)
+            
+        # Re-aplica filtro se houver texto
+        if self.search_input.text():
+            self._filter_repos(self.search_input.text())
+
+    def _filter_repos(self, text):
+        text = text.lower()
+        for i in range(self.repo_list.count()):
+            item = self.repo_list.item(i)
+            repo = item.data(Qt.UserRole)
+            if repo:
+                name = repo.get("name", "").lower()
+                item.setHidden(text not in name)
+
+    def _on_repo_double_clicked(self, item):
+        repo = item.data(Qt.UserRole)
+        if not repo: return
+        
+        clone_url = repo.get("clone_url")
+        name = repo.get("name")
+        
+        dest_folder = QFileDialog.getExistingDirectory(self, f"Clonar {name} em...")
+        if dest_folder:
+            success, msg = self.git_logic.clone_repository(clone_url, dest_folder)
+            if success:
+                QMessageBox.information(self, "Sucesso", msg)
+            else:
+                QMessageBox.critical(self, "Erro", msg)
+
+    def _show_repo_context_menu(self, pos):
+        item = self.repo_list.itemAt(pos)
+        if not item: return
+        
+        repo = item.data(Qt.UserRole)
+        if not repo: return
+
+        menu = QMenu(self)
+        menu.setStyleSheet(f"QMenu {{ background-color: {self.theme.get('sidebar_bg')}; color: {self.theme.get('foreground')}; }} QMenu::item:selected {{ background-color: {self.theme.get('accent')}; }}")
+        
+        action_open = menu.addAction("Abrir no Navegador (GitHub)")
+        action_open.triggered.connect(lambda: webbrowser.open(repo.get("html_url", "")))
+        
+        menu.exec(self.repo_list.mapToGlobal(pos))
 
     def _handle_login(self):
         token = self.token_input.text().strip()

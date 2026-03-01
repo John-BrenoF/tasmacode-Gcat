@@ -14,6 +14,7 @@ class GithubAuth(QObject):
     def __init__(self, config_dir: str):
         super().__init__()
         self.config_file = os.path.join(config_dir, "auth_session.json")
+        self.avatar_file = os.path.join(config_dir, "avatar_cache.png")
         self._user_data = None
         self._token = None
         self._load_session()
@@ -53,6 +54,9 @@ class GithubAuth(QObject):
         self._user_data = None
         if os.path.exists(self.config_file):
             os.remove(self.config_file)
+        # Limpa o cache do avatar ao sair
+        if os.path.exists(self.avatar_file):
+            os.remove(self.avatar_file)
         self.auth_changed.emit()
 
     def _save_session(self):
@@ -77,9 +81,36 @@ class GithubAuth(QObject):
 
     def get_avatar_bytes(self) -> bytes | None:
         if not self._user_data: return None
+        
+        # 1. Tenta carregar do cache local
+        if os.path.exists(self.avatar_file):
+            try:
+                with open(self.avatar_file, "rb") as f:
+                    return f.read()
+            except Exception as e:
+                logger.warning(f"Erro ao ler cache do avatar: {e}")
+
         url = self._user_data.get("avatar_url")
         if not url: return None
         try:
-            return requests.get(url, timeout=5).content
+            # 2. Baixa se não existir
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                data = response.content
+                # 3. Salva no cache
+                with open(self.avatar_file, "wb") as f:
+                    f.write(data)
+                return data
         except:
             return None
+
+    def get_user_repos(self) -> list:
+        """Retorna lista de repositórios do usuário (limitado aos 10 mais recentes)."""
+        if not self._token: return []
+        headers = {"Authorization": f"token {self._token}"}
+        try:
+            response = requests.get("https://api.github.com/user/repos?sort=updated&per_page=10", headers=headers, timeout=5)
+            return response.json() if response.status_code == 200 else []
+        except Exception as e:
+            logger.error(f"Erro ao buscar repositórios: {e}")
+            return []

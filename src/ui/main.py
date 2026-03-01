@@ -3,7 +3,7 @@ import os
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QSplitter, QFileDialog, QInputDialog, QMessageBox
 from PySide6.QtGui import QKeySequence
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QTextCursor, QAction, QKeySequence
+from PySide6.QtGui import QTextCursor, QAction, QKeySequence, QCursor
 from PySide6.QtCore import QDir
 # Ajuste de Path para garantir que imports funcionem a partir da raiz
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -468,6 +468,7 @@ class JCodeMainWindow(QMainWindow):
         self.live_server_manager.server_started.connect(self._on_live_server_started)
         self.live_server_manager.server_stopped.connect(self._on_live_server_stopped)
         self.live_server_manager.error.connect(lambda msg: self.custom_statusbar.flash_message(msg, color="#dc3545"))
+        self.custom_statusbar.avatar_clicked.connect(self._on_avatar_clicked)
 
     def _on_active_editor_changed(self, editor_widget):
         self.active_editor = editor_widget
@@ -477,6 +478,13 @@ class JCodeMainWindow(QMainWindow):
         self._on_buffer_modified()
         # Limpa os highlights de busca ao trocar de aba
         self._hide_search_panel()
+
+    def _on_avatar_clicked(self):
+        """Mostra menu de opções ao clicar no avatar."""
+        menu = QMenu(self)
+        menu.addAction("Ver Perfil", self._show_profile_window)
+        menu.addAction("Sair (Logout)", self.github_auth.logout)
+        menu.exec(QCursor.pos())
 
     def _show_settings_dialog(self):
         dlg = SettingsDialog(self.config_manager, self.theme_manager, self)
@@ -548,7 +556,7 @@ class JCodeMainWindow(QMainWindow):
 
     def _show_profile_window(self):
         """Abre a janela de perfil do GitHub."""
-        dlg = ProfileWindow(self.github_auth, self)
+        dlg = ProfileWindow(self.github_auth, self.theme_manager, self)
         dlg.exec()
 
     def _close_current_tab(self):
