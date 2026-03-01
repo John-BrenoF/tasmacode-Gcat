@@ -77,3 +77,24 @@ class GitLogic:
         except Exception as e:
             logger.error(f"Git graph error: {e}")
             return []
+
+    def stage_all(self, repo_path: str):
+        """Adiciona todos os arquivos modificados ao stage."""
+        subprocess.run(["git", "add", "."], cwd=repo_path, check=False)
+
+    def commit(self, repo_path: str, message: str) -> tuple[bool, str]:
+        """Realiza um commit com todos os arquivos modificados."""
+        if not message: return False, "Mensagem de commit vazia."
+        try:
+            self.stage_all(repo_path)
+            subprocess.run(["git", "commit", "-m", message], cwd=repo_path, check=True, capture_output=True)
+            return True, "Commit realizado com sucesso."
+        except subprocess.CalledProcessError as e:
+            return False, f"Erro no commit: {e.stderr.decode() if e.stderr else str(e)}"
+
+    def create_branch(self, repo_path: str, branch_name: str) -> tuple[bool, str]:
+        try:
+            subprocess.run(["git", "checkout", "-b", branch_name], cwd=repo_path, check=True, capture_output=True)
+            return True, f"Branch '{branch_name}' criado e ativo."
+        except subprocess.CalledProcessError as e:
+            return False, f"Erro ao criar branch: {e.stderr.decode() if e.stderr else str(e)}"

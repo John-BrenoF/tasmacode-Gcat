@@ -1,13 +1,39 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, 
-                               QFileDialog, QMessageBox, QFrame, QStackedWidget, QScrollArea)
-from PySide6.QtCore import Qt, QRect, QPointF, Signal
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPainterPath, QFontMetrics
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit,
+                               QFileDialog, QMessageBox, QFrame, QStackedWidget, QScrollArea, QMenu, QInputDialog, QApplication)
+from PySide6.QtCore import Qt, QRect, QPointF, Signal, QPoint
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPainterPath, QFontMetrics, QCursor
 from src.core.git_logic import GitLogic
+
+class CommitTooltip(QLabel):
+    """Tooltip customizado flutuante para commits."""
+    def __init__(self):
+        super().__init__(None, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        self.setStyleSheet("""
+            background-color: #1e1e1e;
+            color: #cccccc;
+            border: 1px solid #454545;
+            border-radius: 4px;
+            padding: 8px;
+        """)
+        self.setWordWrap(True)
+        self.setMaximumWidth(300)
+
+    def show_data(self, commit, pos):
+        content = (f"<b style='color: #ffffff'>Hash:</b> {commit['hash'][:8]}<br>"
+                   f"<b style='color: #ffffff'>Autor:</b> {commit['author']}<br>"
+                   f"<b style='color: #ffffff'>Data:</b> {commit['date']}<br>"
+                   f"<hr style='background-color: #454545; height: 1px; border: none;'>"
+                   f"{commit['message'].replace(chr(10), '<br>')}")
+        self.setText(content)
+        self.adjustSize()
+        self.move(pos)
+        self.show()
 
 class GitGraphWidget(QWidget):
     """Widget customizado para desenhar o grafo de commits."""
     
     commit_clicked = Signal(dict)
+    copy_hash_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -17,27 +43,55 @@ class GitGraphWidget(QWidget):
         self.lane_width = 24 # Largura aumentada para evitar aglomeração
         self.setMinimumHeight(400)
         self.hit_areas = [] # Armazena áreas clicáveis: (QRect, commit_data)
+        self.setMouseTracking(True) # Habilita rastreamento do mouse para hover
+        self.hovered_commit = None
+        self.hover_pos = QPoint(0, 0)
         # Cores para os branches
         self.colors = [
             QColor("#40c463"), QColor("#f38ba8"), QColor("#89b4fa"), 
             QColor("#fab387"), QColor("#cba6f7"), QColor("#f9e2af"), 
             QColor("#94e2d5")
         ]
+        self.tooltip_widget = CommitTooltip()
 
     def set_data(self, commits):
         self.commits = commits
         self.setMinimumHeight(len(commits) * self.row_height + 20)
         self.update()
 
-    def mousePressEvent(self, event):
-        """Detecta cliques nos nós dos commits."""
+    def mouseMoveEvent(self, event):
+        """Detecta hover sobre os commits."""
         pos = event.position().toPoint()
+        self.hover_pos = pos
+        found = None
         for rect, commit in self.hit_areas:
-            # Expande levemente a área de clique para facilitar
-            if rect.adjusted(-3, -3, 3, 3).contains(pos):
-                self.commit_clicked.emit(commit)
-                return
-        super().mousePressEvent(event)
+            if rect.adjusted(-5, -5, 5, 5).contains(pos):
+                found = commit
+                break
+        
+        if found:
+            global_pos = self.mapToGlobal(pos) + QPoint(15, 15)
+            self.tooltip_widget.show_data(found, global_pos)
+            self.hovered_commit = found
+        else:
+            self.tooltip_widget.hide()
+            self.hovered_commit = None
+        
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event):
+        self.hovered_commit = None
+        self.tooltip_widget.hide()
+        super().leaveEvent(event)
+
+    def contextMenuEvent(self, event):
+        """Menu de contexto ao clicar com botão direito."""
+        if self.hovered_commit:
+            menu = QMenu(self)
+            menu.setStyleSheet("QMenu { background-color: #252526; color: #cccccc; } QMenu::item:selected { background-color: #007acc; }")
+            menu.addAction("Copiar Hash", lambda: self.copy_hash_requested.emit(self.hovered_commit['hash']))
+            menu.addAction("Copiar Mensagem", lambda: QApplication.clipboard().setText(self.hovered_commit['message']))
+            menu.exec(event.globalPos())
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -260,12 +314,43 @@ class RightSidebar(QWidget):
         
         self.lbl_branch = QLabel("Branch: -")
         self.lbl_branch.setStyleSheet("font-weight: bold; color: #fff;")
+
+        btn_new_branch = QPushButton("+")
+        btn_new_branch.setToolTip("Criar Nova Branch")
+        btn_new_branch.setFixedSize(20, 20)
+        btn_new_branch.setStyleSheet("background-color: #3c3c3c; color: white; border: none; border-radius: 2px;")
+        btn_new_branch.clicked.connect(self._create_branch)
         
         btn_refresh = QPushButton("Atualizar")
         btn_refresh.clicked.connect(self._refresh_graph)
         btn_refresh.setStyleSheet("background-color: #3c3c3c; color: white; border: none; padding: 4px;")
         
-        header_layout.addWidget(self.lbl_branch)
+        branch_layout = QVBoxLayout()
+        branch_row = QHBoxLayout()
+        branch_row.addWidget(self.lbl_branch)
+        branch_row.addWidget(btn_new_branch)
+        branch_row.addStretch()
+        branch_layout.addLayout(branch_row)
+        
+        header_layout.addLayout(branch_layout)
+        
+        # --- Área de Commit ---
+        commit_frame = QFrame()
+        commit_layout = QVBoxLayout(commit_frame)
+        commit_layout.setContentsMargins(0, 5, 0, 5)
+        
+        self.commit_msg_input = QTextEdit()
+        self.commit_msg_input.setPlaceholderText("Mensagem do commit...")
+        self.commit_msg_input.setFixedHeight(60)
+        self.commit_msg_input.setStyleSheet("background-color: #1e1e1e; color: #ccc; border: 1px solid #3e3e42;")
+        
+        self.btn_commit = QPushButton("Commit (Stage All)")
+        self.btn_commit.setStyleSheet("background-color: #2ea043; color: white; border: none; padding: 6px; border-radius: 3px;")
+        self.btn_commit.clicked.connect(self._perform_commit)
+        
+        commit_layout.addWidget(self.commit_msg_input)
+        commit_layout.addWidget(self.btn_commit)
+        header_layout.addWidget(commit_frame)
         header_layout.addWidget(btn_refresh)
         
         git_layout.addWidget(header_frame)
@@ -276,7 +361,7 @@ class RightSidebar(QWidget):
         scroll.setStyleSheet("background-color: #1e1e1e; border: none;")
         
         self.graph_widget = GitGraphWidget()
-        self.graph_widget.commit_clicked.connect(self._show_commit_details)
+        self.graph_widget.copy_hash_requested.connect(self._copy_hash)
         scroll.setWidget(self.graph_widget)
         
         git_layout.addWidget(scroll)
@@ -308,14 +393,24 @@ class RightSidebar(QWidget):
         commits = self.git_logic.get_graph_data(self.current_repo)
         self.graph_widget.set_data(commits)
 
-    def _show_commit_details(self, commit):
-        details = (
-            f"Hash: {commit['hash']}\n"
-            f"Autor: {commit['author']}\n"
-            f"Data: {commit['date']}\n\n"
-            f"Mensagem:\n{commit['message']}"
-        )
-        QMessageBox.information(self, "Detalhes do Commit", details)
+    def _perform_commit(self):
+        if not self.current_repo: return
+        msg = self.commit_msg_input.toPlainText().strip()
+        success, info = self.git_logic.commit(self.current_repo, msg)
+        if success:
+            self.commit_msg_input.clear()
+            self._refresh_graph()
+            QMessageBox.information(self, "Git", info)
+        else:
+            QMessageBox.warning(self, "Erro no Commit", info)
+
+    def _create_branch(self):
+        if not self.current_repo: return
+        name, ok = QInputDialog.getText(self, "Nova Branch", "Nome da Branch:")
+        if ok and name:
+            success, info = self.git_logic.create_branch(self.current_repo, name)
+            if success: self._refresh_graph()
+            QMessageBox.information(self, "Git", info)
 
     def _handle_clone_click(self):
         url = self.input_url.text().strip()
@@ -345,3 +440,7 @@ class RightSidebar(QWidget):
             self.input_url.clear()
         else:
             QMessageBox.critical(self, "Erro", msg)
+
+    def _copy_hash(self, commit_hash):
+        QApplication.clipboard().setText(commit_hash)
+        # Opcional: Mostrar feedback na statusbar se tivesse acesso
