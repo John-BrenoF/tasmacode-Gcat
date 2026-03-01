@@ -1,5 +1,6 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit,
-                               QFileDialog, QMessageBox, QFrame, QStackedWidget, QScrollArea, QMenu, QInputDialog, QApplication)
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+                               QFileDialog, QMessageBox, QFrame, QStackedWidget, QScrollArea, QMenu, 
+                               QInputDialog, QApplication, QStyle, QComboBox, QDialog, QListWidget, QTextEdit)
 from PySide6.QtCore import Qt, QRect, QPointF, Signal, QPoint
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPainterPath, QFontMetrics, QCursor
 from src.core.git_logic import GitLogic
@@ -28,6 +29,95 @@ class CommitTooltip(QLabel):
         self.adjustSize()
         self.move(pos)
         self.show()
+
+class DiffViewer(QDialog):
+    """Janela para visualizar o diff de um arquivo."""
+    def __init__(self, diff_text, title, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Diff: {title}")
+        self.resize(800, 600)
+        self.setStyleSheet("background-color: #1e1e1e; color: #cccccc;")
+        
+        layout = QVBoxLayout(self)
+        text_edit = QTextEdit()
+        text_edit.setPlainText(diff_text)
+        text_edit.setReadOnly(True)
+        text_edit.setFont(QFont("Monospace", 10))
+        text_edit.setStyleSheet("border: none; background-color: #1e1e1e; color: #cccccc;")
+        layout.addWidget(text_edit)
+
+class CommitDetailsDialog(QDialog):
+    """Janela com detalhes do commit e lista de arquivos modificados."""
+    def __init__(self, repo_path, commit_data, git_logic, parent=None):
+        super().__init__(parent)
+        self.repo_path = repo_path
+        self.commit_data = commit_data
+        self.git_logic = git_logic
+        self.setWindowTitle(f"Commit {commit_data['hash'][:8]}")
+        self.resize(500, 400)
+        self.setStyleSheet("background-color: #252526; color: #cccccc;")
+        
+        layout = QVBoxLayout(self)
+        
+        # Metadata
+        meta = QLabel(f"<b>Autor:</b> {commit_data['author']}<br><b>Data:</b> {commit_data['date']}<br><br>{commit_data['message']}")
+        meta.setWordWrap(True)
+        layout.addWidget(meta)
+        
+        layout.addWidget(QLabel("<b>Arquivos Modificados (Clique para ver Diff):</b>"))
+        
+        self.files_list = QListWidget()
+        self.files_list.setStyleSheet("background-color: #3c3c3c; border: none;")
+        files = self.git_logic.get_commit_files(self.repo_path, self.commit_data['hash'])
+        self.files_list.addItems(files)
+        self.files_list.itemClicked.connect(self._show_diff)
+        layout.addWidget(self.files_list)
+        
+    def _show_diff(self, item):
+        file_path = item.text()
+        diff = self.git_logic.get_diff(self.repo_path, self.commit_data['hash'], file_path)
+        DiffViewer(diff, file_path, self).exec()
+
+class CredentialsDialog(QDialog):
+    """Diálogo para solicitar credenciais do Git."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Autenticação Git")
+        self.resize(350, 180)
+        self.setStyleSheet("background-color: #252526; color: #cccccc;")
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        
+        layout.addWidget(QLabel("Falha na autenticação. Por favor, insira suas credenciais:"))
+        
+        self.user_input = QLineEdit()
+        self.user_input.setPlaceholderText("Username")
+        self.user_input.setStyleSheet("background-color: #3c3c3c; border: 1px solid #454545; padding: 6px; color: white;")
+        
+        self.pass_input = QLineEdit()
+        self.pass_input.setPlaceholderText("Password / Personal Access Token")
+        self.pass_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.pass_input.setStyleSheet("background-color: #3c3c3c; border: 1px solid #454545; padding: 6px; color: white;")
+        
+        btn_box = QHBoxLayout()
+        btn_ok = QPushButton("OK")
+        btn_ok.setStyleSheet("background-color: #007acc; color: white; padding: 6px 12px; border: none; border-radius: 4px;")
+        btn_ok.clicked.connect(self.accept)
+        
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setStyleSheet("background-color: #3c3c3c; color: white; padding: 6px 12px; border: 1px solid #454545; border-radius: 4px;")
+        btn_cancel.clicked.connect(self.reject)
+        
+        btn_box.addWidget(btn_cancel)
+        btn_box.addWidget(btn_ok)
+        
+        layout.addWidget(self.user_input)
+        layout.addWidget(self.pass_input)
+        layout.addLayout(btn_box)
+
+    def get_credentials(self):
+        return self.user_input.text().strip(), self.pass_input.text().strip()
 
 class GitGraphWidget(QWidget):
     """Widget customizado para desenhar o grafo de commits."""
@@ -58,6 +148,14 @@ class GitGraphWidget(QWidget):
         self.commits = commits
         self.setMinimumHeight(len(commits) * self.row_height + 20)
         self.update()
+
+    def mousePressEvent(self, event):
+        pos = event.position().toPoint()
+        for rect, commit in self.hit_areas:
+            if rect.adjusted(-5, -5, 5, 5).contains(pos):
+                self.commit_clicked.emit(commit)
+                return
+        super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         """Detecta hover sobre os commits."""
@@ -251,7 +349,7 @@ class RightSidebar(QWidget):
         super().__init__(parent)
         self.git_logic = GitLogic()
         self.setObjectName("RightSidebar")
-        self.setFixedWidth(250)
+        self.setMinimumWidth(200)
         self.setStyleSheet("background-color: #252526; border-left: 1px solid #3e3e42;")
         
         self._setup_ui()
@@ -310,47 +408,53 @@ class RightSidebar(QWidget):
         # Header Git
         header_frame = QFrame()
         header_frame.setStyleSheet("background-color: #2d2d30; padding: 5px;")
-        header_layout = QVBoxLayout(header_frame)
+        header_layout = QHBoxLayout(header_frame)
+        header_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.lbl_branch = QLabel("Branch: -")
-        self.lbl_branch.setStyleSheet("font-weight: bold; color: #fff;")
+        self.branch_selector = QComboBox()
+        self.branch_selector.setStyleSheet("background-color: #3c3c3c; color: white; border: none; padding: 2px;")
+        self.branch_selector.currentIndexChanged.connect(self._switch_branch)
 
-        btn_new_branch = QPushButton("+")
+        btn_new_branch = QPushButton()
+        btn_new_branch.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
         btn_new_branch.setToolTip("Criar Nova Branch")
-        btn_new_branch.setFixedSize(20, 20)
-        btn_new_branch.setStyleSheet("background-color: #3c3c3c; color: white; border: none; border-radius: 2px;")
+        btn_new_branch.setFixedSize(24, 24)
+        btn_new_branch.setStyleSheet("background-color: transparent; border: none; border-radius: 4px;")
         btn_new_branch.clicked.connect(self._create_branch)
         
-        btn_refresh = QPushButton("Atualizar")
+        btn_commit = QPushButton()
+        btn_commit.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton))
+        btn_commit.setToolTip("Commit")
+        btn_commit.setFixedSize(26, 26)
+        btn_commit.setStyleSheet("background-color: transparent; border: none; border-radius: 4px; margin-left: 5px;")
+        btn_commit.clicked.connect(self._perform_commit)
+
+        btn_pull = QPushButton()
+        btn_pull.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown))
+        btn_pull.setToolTip("Pull")
+        btn_pull.setFixedSize(26, 26)
+        btn_pull.setStyleSheet("background-color: transparent; border: none; border-radius: 4px;")
+        btn_pull.clicked.connect(self._perform_pull)
+
+        btn_push = QPushButton()
+        btn_push.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowUp))
+        btn_push.setToolTip("Push")
+        btn_push.setFixedSize(26, 26)
+        btn_push.setStyleSheet("background-color: transparent; border: none; border-radius: 4px;")
+        btn_push.clicked.connect(self._perform_push)
+
+        btn_refresh = QPushButton()
+        btn_refresh.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
+        btn_refresh.setToolTip("Atualizar")
+        btn_refresh.setFixedSize(26, 26)
+        btn_refresh.setStyleSheet("background-color: transparent; border: none; border-radius: 4px; margin-left: 5px;")
         btn_refresh.clicked.connect(self._refresh_graph)
-        btn_refresh.setStyleSheet("background-color: #3c3c3c; color: white; border: none; padding: 4px;")
         
-        branch_layout = QVBoxLayout()
-        branch_row = QHBoxLayout()
-        branch_row.addWidget(self.lbl_branch)
-        branch_row.addWidget(btn_new_branch)
-        branch_row.addStretch()
-        branch_layout.addLayout(branch_row)
-        
-        header_layout.addLayout(branch_layout)
-        
-        # --- Área de Commit ---
-        commit_frame = QFrame()
-        commit_layout = QVBoxLayout(commit_frame)
-        commit_layout.setContentsMargins(0, 5, 0, 5)
-        
-        self.commit_msg_input = QTextEdit()
-        self.commit_msg_input.setPlaceholderText("Mensagem do commit...")
-        self.commit_msg_input.setFixedHeight(60)
-        self.commit_msg_input.setStyleSheet("background-color: #1e1e1e; color: #ccc; border: 1px solid #3e3e42;")
-        
-        self.btn_commit = QPushButton("Commit (Stage All)")
-        self.btn_commit.setStyleSheet("background-color: #2ea043; color: white; border: none; padding: 6px; border-radius: 3px;")
-        self.btn_commit.clicked.connect(self._perform_commit)
-        
-        commit_layout.addWidget(self.commit_msg_input)
-        commit_layout.addWidget(self.btn_commit)
-        header_layout.addWidget(commit_frame)
+        header_layout.addWidget(self.branch_selector, 1)
+        header_layout.addWidget(btn_new_branch)
+        header_layout.addWidget(btn_commit)
+        header_layout.addWidget(btn_pull)
+        header_layout.addWidget(btn_push)
         header_layout.addWidget(btn_refresh)
         
         git_layout.addWidget(header_frame)
@@ -362,6 +466,7 @@ class RightSidebar(QWidget):
         
         self.graph_widget = GitGraphWidget()
         self.graph_widget.copy_hash_requested.connect(self._copy_hash)
+        self.graph_widget.commit_clicked.connect(self._open_commit_details)
         scroll.setWidget(self.graph_widget)
         
         git_layout.addWidget(scroll)
@@ -388,27 +493,81 @@ class RightSidebar(QWidget):
         if not self.current_repo: return
         
         branch = self.git_logic.get_current_branch(self.current_repo)
-        self.lbl_branch.setText(f"Branch: {branch}")
+        branches = self.git_logic.get_branches(self.current_repo)
         
+        self.branch_selector.blockSignals(True)
+        self.branch_selector.clear()
+        self.branch_selector.addItems(branches)
+        self.branch_selector.setCurrentText(branch)
+        self.branch_selector.blockSignals(False)
+
         commits = self.git_logic.get_graph_data(self.current_repo)
         self.graph_widget.set_data(commits)
 
     def _perform_commit(self):
         if not self.current_repo: return
-        msg = self.commit_msg_input.toPlainText().strip()
-        success, info = self.git_logic.commit(self.current_repo, msg)
+        msg, ok = QInputDialog.getMultiLineText(self, "Commit", "Mensagem do Commit:")
+        if ok and msg.strip():
+            success, info = self.git_logic.commit(self.current_repo, msg.strip())
+            if success:
+                self._refresh_graph()
+                QMessageBox.information(self, "Git", info)
+            else:
+                QMessageBox.warning(self, "Erro no Commit", info)
+
+    def _perform_push(self):
+        if not self.current_repo: return
+        success, info = self.git_logic.push(self.current_repo)
+        
+        # Verifica falha de autenticação
+        if not success and ("Authentication failed" in info or "could not read" in info):
+            dlg = CredentialsDialog(self)
+            if dlg.exec():
+                user, token = dlg.get_credentials()
+                if user and token:
+                    success, info = self.git_logic.push(self.current_repo, user, token)
+
         if success:
-            self.commit_msg_input.clear()
-            self._refresh_graph()
-            QMessageBox.information(self, "Git", info)
+            QMessageBox.information(self, "Git Push", info)
         else:
-            QMessageBox.warning(self, "Erro no Commit", info)
+            QMessageBox.warning(self, "Git Push", info)
+
+    def _perform_pull(self):
+        if not self.current_repo: return
+        success, info = self.git_logic.pull(self.current_repo)
+        
+        # Verifica falha de autenticação
+        if not success and ("Authentication failed" in info or "could not read" in info):
+            dlg = CredentialsDialog(self)
+            if dlg.exec():
+                user, token = dlg.get_credentials()
+                if user and token:
+                    success, info = self.git_logic.pull(self.current_repo, user, token)
+
+        if success:
+            self._refresh_graph()
+            QMessageBox.information(self, "Git Pull", info)
+        else:
+            QMessageBox.warning(self, "Git Pull", info)
+
+    def _switch_branch(self):
+        branch = self.branch_selector.currentText()
+        if branch:
+            success, info = self.git_logic.checkout(self.current_repo, branch)
+            if success:
+                self._refresh_graph()
+            else:
+                QMessageBox.warning(self, "Checkout", info)
+                # Reverte seleção visual
+                self._refresh_graph()
 
     def _create_branch(self):
         if not self.current_repo: return
         name, ok = QInputDialog.getText(self, "Nova Branch", "Nome da Branch:")
         if ok and name:
-            success, info = self.git_logic.create_branch(self.current_repo, name)
+            # Sanitiza o nome: Git não aceita espaços em nomes de branch
+            sanitized_name = name.strip().replace(" ", "-")
+            success, info = self.git_logic.create_branch(self.current_repo, sanitized_name)
             if success: self._refresh_graph()
             QMessageBox.information(self, "Git", info)
 
@@ -444,3 +603,6 @@ class RightSidebar(QWidget):
     def _copy_hash(self, commit_hash):
         QApplication.clipboard().setText(commit_hash)
         # Opcional: Mostrar feedback na statusbar se tivesse acesso
+
+    def _open_commit_details(self, commit_data):
+        CommitDetailsDialog(self.current_repo, commit_data, self.git_logic, self).exec()

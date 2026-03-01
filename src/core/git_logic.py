@@ -18,7 +18,9 @@ class GitLogic:
         try:
             # Executa o git clone no diretório escolhido
             # check=True levanta exceção se o comando falhar
-            subprocess.run(["git", "clone", repo_url], cwd=destination_folder, check=True, capture_output=True)
+            env = os.environ.copy()
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            subprocess.run(["git", "clone", repo_url], cwd=destination_folder, check=True, capture_output=True, env=env)
             return True, f"Repositório clonado com sucesso em: {destination_folder}"
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr.decode().strip() if e.stderr else "Erro desconhecido"
@@ -98,3 +100,77 @@ class GitLogic:
             return True, f"Branch '{branch_name}' criado e ativo."
         except subprocess.CalledProcessError as e:
             return False, f"Erro ao criar branch: {e.stderr.decode() if e.stderr else str(e)}"
+
+    def get_remote_url(self, repo_path: str, remote: str = "origin") -> str:
+        try:
+            res = subprocess.run(["git", "remote", "get-url", remote], cwd=repo_path, capture_output=True, text=True)
+            return res.stdout.strip()
+        except:
+            return ""
+
+    def _inject_credentials(self, url: str, username: str, token: str) -> str:
+        if "://" not in url: return url
+        protocol, rest = url.split("://", 1)
+        if "@" in rest:
+            rest = rest.split("@", 1)[1]
+        return f"{protocol}://{username}:{token}@{rest}"
+
+    def push(self, repo_path: str, username: str = None, token: str = None) -> tuple[bool, str]:
+        try:
+            cmd = ["git", "push"]
+            if username and token:
+                url = self.get_remote_url(repo_path)
+                if url.startswith("http"):
+                    auth_url = self._inject_credentials(url, username, token)
+                    cmd = ["git", "push", auth_url]
+            
+            env = os.environ.copy()
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            subprocess.run(cmd, cwd=repo_path, check=True, capture_output=True, env=env)
+            return True, "Push realizado com sucesso."
+        except subprocess.CalledProcessError as e:
+            return False, f"Erro no Push: {e.stderr.decode() if e.stderr else str(e)}"
+
+    def pull(self, repo_path: str, username: str = None, token: str = None) -> tuple[bool, str]:
+        try:
+            cmd = ["git", "pull"]
+            if username and token:
+                url = self.get_remote_url(repo_path)
+                if url.startswith("http"):
+                    auth_url = self._inject_credentials(url, username, token)
+                    cmd = ["git", "pull", auth_url]
+
+            env = os.environ.copy()
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            subprocess.run(cmd, cwd=repo_path, check=True, capture_output=True, env=env)
+            return True, "Pull realizado com sucesso."
+        except subprocess.CalledProcessError as e:
+            return False, f"Erro no Pull: {e.stderr.decode() if e.stderr else str(e)}"
+
+    def get_branches(self, repo_path: str) -> list[str]:
+        try:
+            res = subprocess.run(["git", "branch", "--format=%(refname:short)"], cwd=repo_path, capture_output=True, text=True)
+            return [b.strip() for b in res.stdout.split('\n') if b.strip()]
+        except:
+            return []
+
+    def checkout(self, repo_path: str, branch_name: str) -> tuple[bool, str]:
+        try:
+            subprocess.run(["git", "checkout", branch_name], cwd=repo_path, check=True, capture_output=True)
+            return True, f"Checkout para '{branch_name}' realizado."
+        except subprocess.CalledProcessError as e:
+            return False, f"Erro no Checkout: {e.stderr.decode() if e.stderr else str(e)}"
+
+    def get_commit_files(self, repo_path: str, commit_hash: str) -> list[str]:
+        try:
+            res = subprocess.run(["git", "show", "--pretty=", "--name-only", commit_hash], cwd=repo_path, capture_output=True, text=True)
+            return [f for f in res.stdout.split('\n') if f.strip()]
+        except:
+            return []
+
+    def get_diff(self, repo_path: str, commit_hash: str, file_path: str) -> str:
+        try:
+            res = subprocess.run(["git", "show", commit_hash, "--", file_path], cwd=repo_path, capture_output=True, text=True)
+            return res.stdout
+        except:
+            return "Não foi possível obter o diff."
