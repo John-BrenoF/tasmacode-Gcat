@@ -42,6 +42,8 @@ from src.ui.about_window import AboutWindow
 from src.ui.store_window import StoreWindow
 from src.ui.theme_editor_dialog import ThemeEditorDialog
 from src.serv_live.live_server_manager import LiveServerManager
+from src.core.github_auth import GithubAuth
+from src.ui.profile_window import ProfileWindow
 
 class JCodeMainWindow(QMainWindow):
     """Janela principal do editor JCODE.
@@ -67,6 +69,8 @@ class JCodeMainWindow(QMainWindow):
         self.session_manager = SessionManager()
         self.config_manager = ConfigManager()
         self.input_mapper = InputMapper(self.command_registry)
+        self.github_auth = GithubAuth(self.config_manager.config_dir)
+        self.github_auth.auth_changed.connect(self._update_user_avatar)
         
         self.live_server_manager = LiveServerManager()
         self.event_handler = EventHandler(self.extension_bridge, None) # Buffer será definido dinamicamente
@@ -96,6 +100,7 @@ class JCodeMainWindow(QMainWindow):
         
         # Hook de inicialização
         self.extension_bridge.trigger_hook("on_app_start")
+        self._update_user_avatar()
 
     def closeEvent(self, event):
         """Salva a sessão ao fechar."""
@@ -107,6 +112,7 @@ class JCodeMainWindow(QMainWindow):
         # Componentes principais
         self.sidebar = Sidebar()
         self.right_sidebar = RightSidebar()
+        self.right_sidebar.set_auth_logic(self.github_auth) # Injeta lógica de auth
         self.editor_group = EditorGroup()
         
         self.custom_statusbar = StatusBar()
@@ -187,6 +193,12 @@ class JCodeMainWindow(QMainWindow):
         save_session_action.triggered.connect(self._save_session)
         session_menu.addAction(self.switch_project_action)
         session_menu.addAction(save_session_action)
+        
+        # --- Menu Perfil ---
+        profile_menu = menu_bar.addMenu("&Perfil")
+        profile_action = QAction("Login / Perfil GitHub", self)
+        profile_action.triggered.connect(self._show_profile_window)
+        profile_menu.addAction(profile_action)
 
         # --- Outros Menus (Placeholders) ---
 
@@ -533,6 +545,11 @@ class JCodeMainWindow(QMainWindow):
         dialog.exec()
         # Restaura o tema salvo após fechar o diálogo
         self._apply_config_globally(self.config_manager.config)
+
+    def _show_profile_window(self):
+        """Abre a janela de perfil do GitHub."""
+        dlg = ProfileWindow(self.github_auth, self)
+        dlg.exec()
 
     def _close_current_tab(self):
         """Fecha a aba atual com segurança."""
@@ -1081,6 +1098,14 @@ class JCodeMainWindow(QMainWindow):
         
         self.session_manager.save_session(root_path, open_files, active_path)
 
+
+    def _update_user_avatar(self):
+        """Atualiza o avatar na barra de status."""
+        if self.github_auth.is_logged_in():
+            avatar_bytes = self.github_auth.get_avatar_bytes()
+            self.custom_statusbar.set_avatar(avatar_bytes)
+        else:
+            self.custom_statusbar.set_avatar(None)
 
     def _on_active_editor_changed(self, editor_widget):
 

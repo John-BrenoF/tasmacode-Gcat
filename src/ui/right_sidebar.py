@@ -348,6 +348,7 @@ class RightSidebar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.git_logic = GitLogic()
+        self.auth_logic = None
         self.setObjectName("RightSidebar")
         self.setMinimumWidth(200)
         self.setStyleSheet("background-color: #252526; border-left: 1px solid #3e3e42;")
@@ -479,6 +480,9 @@ class RightSidebar(QWidget):
         
         self.current_repo = None
 
+    def set_auth_logic(self, auth_logic):
+        self.auth_logic = auth_logic
+
     def load_repo(self, path):
         """Chamado quando um projeto é aberto."""
         if self.git_logic.is_repo(path):
@@ -519,6 +523,12 @@ class RightSidebar(QWidget):
         if not self.current_repo: return
         success, info = self.git_logic.push(self.current_repo)
         
+        # Tenta usar credenciais salvas se falhar
+        if not success and self.auth_logic and self.auth_logic.is_logged_in():
+            user_data = self.auth_logic.get_user_data()
+            token = self.auth_logic.get_token()
+            success, info = self.git_logic.push(self.current_repo, user_data['login'], token)
+        
         # Verifica falha de autenticação
         if not success and ("Authentication failed" in info or "could not read" in info):
             dlg = CredentialsDialog(self)
@@ -535,6 +545,12 @@ class RightSidebar(QWidget):
     def _perform_pull(self):
         if not self.current_repo: return
         success, info = self.git_logic.pull(self.current_repo)
+        
+        # Tenta usar credenciais salvas se falhar
+        if not success and self.auth_logic and self.auth_logic.is_logged_in():
+            user_data = self.auth_logic.get_user_data()
+            token = self.auth_logic.get_token()
+            success, info = self.git_logic.pull(self.current_repo, user_data['login'], token)
         
         # Verifica falha de autenticação
         if not success and ("Authentication failed" in info or "could not read" in info):

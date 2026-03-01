@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import QStatusBar, QLabel, QPushButton, QWidget, QHBoxLayout, QStyle, QMenu
 from PySide6.QtCore import Qt, QTimer, QSize, Signal
+from PySide6.QtGui import QPixmap
 
 class StatusBar(QStatusBar):
     """Barra de status customizada."""
@@ -20,6 +21,11 @@ class StatusBar(QStatusBar):
         self.right_layout.setSpacing(10)
         
         # Widgets
+        self.lbl_avatar = QLabel()
+        self.lbl_avatar.setFixedSize(20, 20)
+        self.lbl_avatar.setStyleSheet("border-radius: 10px; background-color: #444;")
+        self.lbl_avatar.hide()
+
         self.lbl_cursor = self._create_label("Ln 1, Col 1", min_width=100)
         self.lbl_indent = self._create_label("Spaces: 4", min_width=80)
         self.lbl_encoding = self._create_label("UTF-8", min_width=60)
@@ -60,6 +66,7 @@ class StatusBar(QStatusBar):
         self.lbl_live_link.hide()
 
         # Adiciona ao layout
+        self.right_layout.addWidget(self.lbl_avatar)
         self.right_layout.addWidget(self.lbl_cursor)
         self.right_layout.addWidget(self.lbl_indent)
         self.right_layout.addWidget(self.lbl_encoding)
@@ -122,6 +129,16 @@ class StatusBar(QStatusBar):
     def _reset_style(self):
         self.setStyleSheet(self._default_style)
         self.clearMessage()
+
+    def set_avatar(self, image_bytes):
+        if image_bytes:
+            pixmap = QPixmap()
+            pixmap.loadFromData(image_bytes)
+            scaled = pixmap.scaled(20, 20, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.lbl_avatar.setPixmap(scaled)
+            self.lbl_avatar.show()
+        else:
+            self.lbl_avatar.hide()
 
     def apply_theme(self, theme):
         """Aplica o tema visual à barra de status."""
