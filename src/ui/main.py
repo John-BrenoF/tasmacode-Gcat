@@ -14,6 +14,7 @@ if root_dir not in sys.path:
 from src.core.editor_logic.buffer import DocumentBuffer
 from src.core.editor_logic.file_manager import FileManager
 from src.core.ui_logic.extension_bridge import ExtensionBridge
+from src.core.editor_logic.autocomplete_manager import AutocompleteManager
 from src.core.editor_logic.search_manager import SearchManager
 from src.core.syntax_highlighter import SyntaxHighlighter
 from src.core.ui_logic.theme_manager import ThemeManager
@@ -61,6 +62,7 @@ class JCodeMainWindow(QMainWindow):
         self.highlighter = SyntaxHighlighter()
         self.search_manager = SearchManager()
         self.extension_bridge = ExtensionBridge()
+        self.autocomplete_manager = AutocompleteManager()
         
         themes_path = os.path.join(root_dir, "themes")
         self.theme_manager = ThemeManager(themes_path)
@@ -333,7 +335,7 @@ class JCodeMainWindow(QMainWindow):
         r = self.command_registry
         
         # Comandos de Edição
-        r.register("type_char", lambda t: get_active_buffer_and_execute("insert_text", t))
+        r.register("type_char", self._handle_type_char)
         r.register("edit.insert_pair", lambda p: get_active_buffer_and_execute("insert_paired_text", p))
         r.register("edit.backspace", lambda: get_active_buffer_and_execute("delete_backspace"))
         r.register("edit.new_line", lambda: get_active_buffer_and_execute("insert_text", "\n"))
@@ -374,6 +376,55 @@ class JCodeMainWindow(QMainWindow):
         r.register("edit.rename", self._quick_rename)
         r.register("file.save", self._save_file)
         r.register("file.save_as", self._save_file_as)
+
+    def _handle_type_char(self, text):
+        """Trata a digitação de caracteres, incluindo lógica de auto-close tag."""
+        if not self.active_editor or not self.active_editor.buffer: return
+        
+        buffer = self.active_editor.buffer
+        buffer.insert_text(text)
+        self._on_buffer_modified()
+        
+        # Lógica de Fechamento Automático de Tags HTML
+        if text == ">":
+            self._check_auto_close_tag(buffer)
+
+    def _check_auto_close_tag(self, buffer):
+        """Verifica e insere tag de fechamento HTML se necessário."""
+        file_path = self.active_editor.property("file_path")
+        if not file_path: return
+        
+        # Verifica extensões relevantes
+        valid_exts = ('.html', '.htm', '.xml', '.js', '.jsx', '.ts', '.tsx', '.vue', '.php')
+        if not file_path.lower().endswith(valid_exts):
+            return
+
+        cursor = buffer.cursors[-1]
+        line_content = buffer.get_lines(cursor.line, cursor.line + 1)[0]
+        before_cursor = line_content[:cursor.col]
+        
+        # Encontra a última abertura de tag '<'
+        open_bracket_index = before_cursor.rfind('<')
+        if open_bracket_index == -1: return
+        
+        # Extrai conteúdo da tag (ex: "div class='foo'")
+        tag_content = before_cursor[open_bracket_index+1:-1] # Remove o '>' final
+        
+        parts = tag_content.split()
+        if not parts: return
+        tag_name = parts[0]
+        
+        # Ignora tags de fechamento (/div) ou self-closing (br, img, etc)
+        if tag_name.startswith('/') or tag_content.endswith('/'): return
+        
+        void_tags = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr", "!doctype"}
+        if tag_name.lower() in void_tags: return
+        
+        # Insere fechamento e move cursor para o meio
+        closing_tag = f"</{tag_name}>"
+        buffer.insert_text(closing_tag)
+        buffer.move_cursors(0, -len(closing_tag)) # Volta o cursor para entre as tags
+        self._on_buffer_modified()
 
     def _new_session(self):
         """Cria uma nova sessão, fechando todos os arquivos e limpando o projeto."""
@@ -471,13 +522,52 @@ class JCodeMainWindow(QMainWindow):
         self.custom_statusbar.avatar_clicked.connect(self._on_avatar_clicked)
 
     def _on_active_editor_changed(self, editor_widget):
+        """Chamado quando a aba ativa muda."""
         self.active_editor = editor_widget
         if editor_widget:
             self.event_handler.buffer = editor_widget.buffer
             self.viewport_controller.attach_to(editor_widget)
+        else:
+            self.event_handler.buffer = None
+
         self._on_buffer_modified()
         # Limpa os highlights de busca ao trocar de aba
         self._hide_search_panel()
+        if self.active_editor and hasattr(self.active_editor, 'autocomplete_widget'):
+            self.active_editor.autocomplete_widget.hide()
+
+    def _check_autocomplete_trigger(self):
+        """Verifica se o autocomplete deve ser acionado."""
+        editor = self.sender()
+        if not editor or editor is not self.active_editor:
+            return
+
+        if not editor.buffer or not editor.autocomplete_manager:
+            return
+
+        buffer = editor.buffer
+        cursor = buffer.cursors[-1]
+
+        if cursor.col == 0:
+            editor.autocomplete_widget.hide()
+            return
+
+        line_text = buffer.get_lines(cursor.line, cursor.line + 1)[0]
+        if cursor.col > len(line_text):
+            return
+
+        char = line_text[cursor.col - 1]
+        if editor.autocomplete_manager.should_trigger(char):
+            file_path = editor.property("file_path") or ""
+            suggestions = editor.autocomplete_manager.get_suggestions(buffer, cursor.line, cursor.col, file_path)
+            if suggestions:
+                editor.show_autocomplete(suggestions)
+            else:
+                editor.autocomplete_widget.hide()
+
+    def _hide_autocomplete(self):
+        if self.active_editor and hasattr(self.active_editor, 'autocomplete_widget'):
+            self.active_editor.autocomplete_widget.hide()
 
     def _on_avatar_clicked(self):
         """Mostra menu de opções ao clicar no avatar."""
@@ -827,8 +917,7 @@ class JCodeMainWindow(QMainWindow):
 
             editor = CodeEditor()
             editor.setProperty("file_path", path)
-            editor.set_dependencies(buffer, self.theme_manager, self.highlighter)
-            editor.set_buffer(buffer) # NEW
+            editor.set_dependencies(buffer, self.theme_manager, self.highlighter, self.autocomplete_manager)
             editor.set_input_mapper(self.input_mapper)
             # Aplica configurações atuais ao novo editor
             editor.update_settings(self.config_manager.config)
@@ -840,6 +929,8 @@ class JCodeMainWindow(QMainWindow):
                 self._on_buffer_modified()
 
             editor.text_changed.connect(on_editor_text_changed)
+            editor.text_changed.connect(self._check_autocomplete_trigger)
+            editor.cursor_moved.connect(self._hide_autocomplete)
 
             # Conecta o sinal de modificação deste buffer específico
             editor.setProperty("event_handler", handler)
@@ -887,7 +978,6 @@ class JCodeMainWindow(QMainWindow):
         """Atualiza o widget CodeEditor com o conteúdo do DocumentBuffer."""
         self._update_tab_title()
 
-        """Atualiza o widget CodeEditor com o conteúdo do DocumentBuffer."""
         if not self.active_editor or not self.active_editor.buffer:
             self.setWindowTitle("JCode")
             self.save_action.setEnabled(False)
@@ -1114,26 +1204,6 @@ class JCodeMainWindow(QMainWindow):
             self.custom_statusbar.set_avatar(avatar_bytes)
         else:
             self.custom_statusbar.set_avatar(None)
-
-    def _on_active_editor_changed(self, editor_widget):
-
-        """Called when the active editor changes."""
-
-        self.active_editor = editor_widget
-
-        if editor_widget:
-            # Connect the text_changed signal of the new active editor to the _on_buffer_modified slot
-            def on_text_changed():
-                editor_widget.buffer.dirty = True
-                self._on_buffer_modified()
-
-            editor_widget.text_changed.connect(on_text_changed)
-
-            self.event_handler.buffer = editor_widget.buffer
-
-            self.viewport_controller.attach_to(editor_widget)
-
-        self._on_buffer_modified()
 
 
 def main():

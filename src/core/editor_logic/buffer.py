@@ -351,6 +351,11 @@ class DocumentBuffer:
 
         (start_line, start_col), (end_line, end_col) = range_
 
+        # Validação de segurança para evitar IndexError
+        if end_line >= len(self._lines):
+            end_line = len(self._lines) - 1
+            end_col = len(self._lines[end_line])
+
         first_line_content = self._lines[start_line]
         last_line_content = self._lines[end_line]
         

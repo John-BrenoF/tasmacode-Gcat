@@ -1,7 +1,8 @@
 from PySide6.QtWidgets import QAbstractScrollArea
-from PySide6.QtCore import Signal, Qt, QTimer, QRect, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Signal, Qt, QTimer, QRect, QPoint
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen
 from plugins.line_number_area import LineNumberArea
+from .autocomplete_widget import AutocompleteWidget
 
 class CodeEditor(QAbstractScrollArea):
     """Canvas de edição de código com renderização customizada.
@@ -10,6 +11,7 @@ class CodeEditor(QAbstractScrollArea):
     """
     
     text_changed = Signal()
+    cursor_moved = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -19,6 +21,8 @@ class CodeEditor(QAbstractScrollArea):
         self.theme = None
         self.highlighter = None
         self.input_mapper = None
+        self.autocomplete_manager = None
+        self.autocomplete_widget = None
         self.show_line_numbers = True
         self.auto_indent = True
         
@@ -63,11 +67,14 @@ class CodeEditor(QAbstractScrollArea):
     def set_buffer(self, buffer):
         self.buffer = buffer
         self.buffer.dirty = False  # Initialize the dirty flag
-
-    def set_dependencies(self, buffer, theme_manager, highlighter):
+    def set_dependencies(self, buffer, theme_manager, highlighter, autocomplete_manager):
         self.buffer = buffer
         self.theme = theme_manager
         self.highlighter = highlighter
+        self.autocomplete_manager = autocomplete_manager
+        if self.autocomplete_manager and not self.autocomplete_widget:
+            self.autocomplete_widget = AutocompleteWidget(self)
+            self.autocomplete_widget.suggestion_selected.connect(self._on_suggestion_selected)
 
     def set_input_mapper(self, mapper):
         self.input_mapper = mapper
@@ -76,11 +83,17 @@ class CodeEditor(QAbstractScrollArea):
         """Sets the file path and emits the file_path_changed signal."""
         self.setProperty("file_path", path)
 
-
     def keyPressEvent(self, event):
         """Delega eventos de teclado para o InputMapper."""
+        if self.autocomplete_widget and self.autocomplete_widget.isVisible():
+            key = event.key()
+            if key in (Qt.Key_Up, Qt.Key_Down, Qt.Key_Enter, Qt.Key_Return, Qt.Key_Tab, Qt.Key_Escape):
+                self.autocomplete_widget.keyPressEvent(event)
+                return
+
         if self.input_mapper and self.input_mapper.handle_key(event):
             event.accept()
+            self.text_changed.emit()
         else:
             self.text_changed.emit()
             super().keyPressEvent(event)
@@ -119,6 +132,7 @@ class CodeEditor(QAbstractScrollArea):
             self.buffer.clear_cursors()
         
         self.buffer.update_last_cursor(target_line, target_col, keep_anchor=keep_anchor)
+        self.cursor_moved.emit()
             
         self._is_dragging = True
         self.viewport().update()
@@ -155,6 +169,7 @@ class CodeEditor(QAbstractScrollArea):
         
         # Atualiza o cursor mantendo a âncora original (seleção)
         self.buffer.update_last_cursor(target_line, target_col, keep_anchor=True)
+        self.cursor_moved.emit()
         
         # Auto-scroll se arrastar para fora da área visível
         if pos.y() < 0:
@@ -166,6 +181,64 @@ class CodeEditor(QAbstractScrollArea):
 
     def mouseReleaseEvent(self, event):
         self._is_dragging = False
+
+    def show_autocomplete(self, suggestions: list):
+        """Exibe o widget de autocomplete na posição correta."""
+        if not self.autocomplete_widget or not self.buffer:
+            return
+        
+        cursor = self.buffer.cursors[-1]
+        
+        # Calcula posição em coordenadas do viewport
+        # x_px = posição horizontal do cursor
+        # y_px = posição vertical do topo da linha do cursor
+        scroll_y = self.verticalScrollBar().value()
+        x_px = cursor.col * self.char_width
+        y_px = (cursor.line * self.line_height) - scroll_y
+        
+        # Atualiza o widget primeiro para ter o tamanho correto
+        self.autocomplete_widget.show_suggestions(suggestions)
+        
+        # Mapeia para as coordenadas do widget CodeEditor
+        point = self.viewport().mapTo(self, QPoint(int(x_px), int(y_px + self.line_height)))
+        
+        # Verifica se o widget vai sair da tela (embaixo)
+        widget_height = self.autocomplete_widget.height()
+        if point.y() + widget_height > self.height():
+            # Posiciona ACIMA do cursor
+            point.setY(int(point.y() - widget_height - self.line_height))
+        
+        self.autocomplete_widget.move(point)
+
+    def _on_suggestion_selected(self, suggestion: dict):
+        """Substitui a palavra atual pela sugestão selecionada."""
+        if not self.buffer: return
+        
+        cursor = self.buffer.cursors[-1]
+        line_text = self.buffer.get_lines(cursor.line, cursor.line + 1)[0]
+        
+        # Encontra o início da palavra que está sendo completada
+        word_start_col = cursor.col
+        while word_start_col > 0 and (line_text[word_start_col - 1].isalnum() or line_text[word_start_col - 1] == '_'):
+            word_start_col -= 1
+            
+        # Seleciona a palavra para substituí-la
+        self.buffer.cursors[-1].anchor_col = word_start_col
+        self.buffer.cursors[-1].col = cursor.col
+        self.buffer.delete_selection()
+        
+        # Insere o snippet ou o texto da sugestão
+        text_to_insert = suggestion.get('insert_text', suggestion.get('label', ''))
+        
+        # Lógica de indentação para snippets com múltiplas linhas
+        if '\n' in text_to_insert:
+            current_indent_spaces = len(line_text) - len(line_text.lstrip(' '))
+            indent_str = ' ' * current_indent_spaces
+            lines = text_to_insert.split('\n')
+            indented_lines = [lines[0]] + [indent_str + line for line in lines[1:]]
+            text_to_insert = '\n'.join(indented_lines)
+            
+        self.buffer.insert_text(text_to_insert)
 
     # --- Lógica do Gutter de Linhas ---
     def line_number_area_width(self):
