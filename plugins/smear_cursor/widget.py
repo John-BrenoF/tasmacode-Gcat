@@ -4,7 +4,10 @@ Responsabilidade: Integrar o smear cursor com QTextEdit
 """
 from PySide6.QtWidgets import QTextEdit, QWidget
 from PySide6.QtCore import Qt, QTimer, Signal, QRect
-from PySide6.QtGui import QPainter, QColor
+from PySide6.QtGui import QPainter, QColor, QBrush
+import math
+import random
+import time
 from .physics import SpringPhysics
 from .renderer import SmearRenderer
 from .colors import ColorManager
@@ -28,9 +31,12 @@ class SmearCursorWidget(QWidget):
         self.timer.timeout.connect(self._update_animation)
         self.timer.start(self.config.time_interval)
         self.enabled = True
+        self.sparks = []
+        self.last_type_time = 0.0
         
         # Conecta ao sinal de movimento do cursor do editor
         self.editor.cursor_moved.connect(self._on_cursor_moved)
+        self.editor.text_changed.connect(self._on_text_changed)
         
         self.animating = False
         
@@ -44,8 +50,54 @@ class SmearCursorWidget(QWidget):
         """Atualiza configurações dinamicamente."""
         stiffness = settings.get("smear_stiffness", 0.6)
         mode = settings.get("smear_mode", "solid")
-        self.physics.set_base_stiffness(stiffness)
+        preset = settings.get("smear_physics_preset", "Default")
+        glow_hex = settings.get("smear_glow_color", "")
+        opacity = settings.get("smear_opacity", 1.0)
+        self.config.sparks_enabled = settings.get("smear_sparks", False)
+        
+        self.physics.apply_preset(preset)
+        self.physics.set_base_stiffness(stiffness) # Slider sobrescreve a base do preset se alterado
         self.renderer.set_mode(mode)
+        self.renderer.set_opacity(opacity)
+        
+        if glow_hex:
+            self.renderer.set_glow_color(QColor(glow_hex))
+        else:
+            self.renderer.set_glow_color(None)
+
+    def _on_text_changed(self):
+        """Detecta digitação para emitir faíscas."""
+        now = time.time()
+        # Se digitar rápido (< 300ms entre teclas) e faíscas ativadas
+        if self.config.sparks_enabled and (now - self.last_type_time < 0.3):
+            self._emit_sparks()
+            self.animating = True
+        self.last_type_time = now
+
+    def _emit_sparks(self):
+        if not self.editor.buffer or not self.editor.buffer.cursors:
+            return
+        
+        cursor = self.editor.buffer.cursors[-1]
+        scroll_y = self.editor.verticalScrollBar().value()
+        x = (cursor.col * self.editor.char_width) + self.editor.line_number_area_width()
+        y = (cursor.line * self.editor.line_height) - scroll_y + (self.editor.line_height / 2)
+        
+        color = self.renderer.cursor_color
+        
+        for _ in range(5):
+            angle = random.uniform(0, 6.28)
+            speed = random.uniform(2, 8)
+            self.sparks.append({
+                'x': x,
+                'y': y,
+                'vx': math.cos(angle) * speed,
+                'vy': math.sin(angle) * speed,
+                'life': 1.0,
+                'decay': random.uniform(0.05, 0.15),
+                'color': color,
+                'size': random.uniform(2, 5)
+            })
 
     def move_cursor_to(self, rect: QRect):
         """Inicia animação para nova posição"""
@@ -58,6 +110,16 @@ class SmearCursorWidget(QWidget):
         """Loop de animação"""
         if self.animating:
             self.physics.update_physics()
+            
+            # Atualiza física das faíscas
+            if self.sparks:
+                for spark in self.sparks:
+                    spark['x'] += spark['vx']
+                    spark['y'] += spark['vy']
+                    spark['life'] -= spark['decay']
+                    spark['vy'] += 0.5 # Gravidade
+                self.sparks = [s for s in self.sparks if s['life'] > 0]
+
             self.update() # Agenda um paint event
             
             # Verifica se animação terminou
@@ -67,7 +129,7 @@ class SmearCursorWidget(QWidget):
                 for i in range(4)
             ) if self.physics.current_corners else 0
             
-            if max_dist < 1:
+            if max_dist < 1 and not self.sparks:
                 self.animating = False
                 
     def paintEvent(self, event):
@@ -82,6 +144,7 @@ class SmearCursorWidget(QWidget):
             
         painter = QPainter(self)
         self.renderer.render_smear(painter, self.physics.current_corners)
+        self.renderer.render_sparks(painter, self.sparks)
 
     def _on_cursor_moved(self):
         """Calcula a posição do cursor no CodeEditor e atualiza o efeito."""

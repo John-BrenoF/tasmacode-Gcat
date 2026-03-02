@@ -12,9 +12,22 @@ class SpringPhysics:
         self.target_corners: List[List[float]] = [[0, 0], [0, 0], [0, 0], [0, 0]]
         self.stiffnesses: List[float] = [0.6, 0.4, 0.3, 0.2]
         self.base_stiffness = 0.6
+        self.drag = 0.4
+        self.exponent = 2.0
         
     def set_base_stiffness(self, value: float):
         self.base_stiffness = max(0.01, min(1.0, value))
+
+    def apply_preset(self, name: str):
+        """Aplica configurações de física baseadas em presets."""
+        presets = {
+            "Default": (0.6, 0.4, 2.0),
+            "Gelatina": (0.2, 0.1, 1.5), # Mais solto e lento
+            "Elástico": (0.4, 0.2, 2.5), # Mais rebote
+            "Rígido": (0.8, 0.7, 3.0)    # Rápido e preciso
+        }
+        if name in presets:
+            self.base_stiffness, self.drag, self.exponent = presets[name]
         
     def update_physics(self):
         """Atualiza posições usando física de molas - baseado no original"""
@@ -63,5 +76,5 @@ class SpringPhysics:
         for i in range(4):
             if max_dist > min_dist:
                 x = (distances[i] - min_dist) / (max_dist - min_dist)
-                stiffness = self.base_stiffness + (0.4 - self.base_stiffness) * x ** 2.0
+                stiffness = self.base_stiffness + (self.drag - self.base_stiffness) * x ** self.exponent
                 self.stiffnesses[i] = min(1, stiffness)

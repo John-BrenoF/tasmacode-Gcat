@@ -13,6 +13,7 @@ class SmearConfig:
         # Configurações de animação
         self.time_interval = 16  # ~60 FPS
         self.enabled = True
+        self.sparks_enabled = False
         
         # Configurações visuais
         self.smear_insert_mode = True
@@ -27,6 +28,7 @@ class SmearConfig:
             'max_length': self.max_length,
             'time_interval': self.time_interval,
             'enabled': self.enabled,
+            'sparks_enabled': self.sparks_enabled,
             'smear_insert_mode': self.smear_insert_mode,
             'smear_normal_mode': self.smear_normal_mode
         }

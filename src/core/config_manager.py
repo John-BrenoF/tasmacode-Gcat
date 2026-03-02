@@ -28,7 +28,11 @@ class ConfigManager(QObject):
             "enable_autocomplete": False,
             "autocomplete_delay": 300,
             "smear_stiffness": 0.6,
-            "smear_mode": "solid"
+            "smear_mode": "solid",
+            "smear_physics_preset": "Default",
+            "smear_glow_color": "",
+            "smear_opacity": 1.0,
+            "smear_sparks": False
         }
         self.config = self.load_config()
 

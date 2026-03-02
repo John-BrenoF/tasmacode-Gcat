@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, 
-                               QLabel, QSlider, QCheckBox, QComboBox, QPushButton, QDialogButtonBox, QLineEdit, QSpinBox)
+                               QLabel, QSlider, QCheckBox, QComboBox, QPushButton, QDialogButtonBox, QLineEdit, QSpinBox, QColorDialog)
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 
 class SettingsDialog(QDialog):
     """Janela de preferências do usuário."""
@@ -68,12 +69,53 @@ class SettingsDialog(QDialog):
         slider_delay.setValue(self.current_config.get('autocomplete_delay', 300))
         slider_delay.valueChanged.connect(lambda v: (lbl_delay.setText(f"Atraso do Autocomplete (ms): {v}"), self._update_local('autocomplete_delay', v)))
 
-        lbl_stiffness = QLabel(f"Intensidade do Smear Cursor: {self.current_config.get('smear_stiffness', 0.6):.2f}")
-        slider_stiffness = QSlider(Qt.Orientation.Horizontal)
-        slider_stiffness.setRange(1, 100) # 0.01 a 1.0
-        slider_stiffness.setValue(int(self.current_config.get('smear_stiffness', 0.6) * 100))
-        slider_stiffness.valueChanged.connect(lambda v: (lbl_stiffness.setText(f"Intensidade do Smear Cursor: {v/100:.2f}"), self._update_local('smear_stiffness', v/100)))
+        # Smear Cursor Settings
+        lbl_smear_title = QLabel("Smear Cursor:")
+        lbl_smear_title.setStyleSheet("font-weight: bold; margin-top: 10px;")
+
+        # Physics Preset
+        lbl_preset = QLabel("Preset de Física:")
+        self.combo_preset = QComboBox()
+        self.combo_preset.setStyleSheet("background-color: #3c3c3c; color: white; padding: 5px;")
+        self.combo_preset.addItems(["Default", "Gelatina", "Elástico", "Rígido"])
+        self.combo_preset.setCurrentText(self.current_config.get("smear_physics_preset", "Default"))
+        self.combo_preset.currentTextChanged.connect(self._on_preset_changed)
+
+        # Glow Color
+        lbl_glow = QLabel("Cor do Glow (Partículas):")
+        glow_layout = QHBoxLayout()
+        self.btn_glow = QPushButton()
+        self.btn_glow.setFixedSize(50, 25)
+        self.btn_glow.setCursor(Qt.CursorShape.PointingHandCursor)
+        current_glow = self.current_config.get("smear_glow_color")
+        self._update_glow_btn_style(current_glow)
+        self.btn_glow.clicked.connect(self._pick_glow_color)
         
+        btn_clear_glow = QPushButton("Auto")
+        btn_clear_glow.setToolTip("Usar cor do cursor")
+        btn_clear_glow.clicked.connect(lambda: (self._update_local("smear_glow_color", ""), self._update_glow_btn_style(""), self._apply_live()))
+        glow_layout.addWidget(self.btn_glow)
+        glow_layout.addWidget(btn_clear_glow)
+        glow_layout.addStretch()
+
+        lbl_stiffness = QLabel(f"Intensidade do Smear Cursor: {self.current_config.get('smear_stiffness', 0.6):.2f}")
+        self.slider_stiffness = QSlider(Qt.Orientation.Horizontal)
+        self.slider_stiffness.setRange(1, 100) # 0.01 a 1.0
+        self.slider_stiffness.setValue(int(self.current_config.get('smear_stiffness', 0.6) * 100))
+        self.slider_stiffness.valueChanged.connect(lambda v: (lbl_stiffness.setText(f"Intensidade do Smear Cursor: {v/100:.2f}"), self._update_local('smear_stiffness', v/100)))
+        
+        # Opacidade
+        lbl_opacity = QLabel(f"Opacidade do Rastro: {int(self.current_config.get('smear_opacity', 1.0) * 100)}%")
+        slider_opacity = QSlider(Qt.Orientation.Horizontal)
+        slider_opacity.setRange(10, 100)
+        slider_opacity.setValue(int(self.current_config.get('smear_opacity', 1.0) * 100))
+        slider_opacity.valueChanged.connect(lambda v: (lbl_opacity.setText(f"Opacidade do Rastro: {v}%"), self._update_local('smear_opacity', v/100)))
+
+        # Sparks
+        chk_sparks = QCheckBox("Efeito de Faíscas (Power Mode)")
+        chk_sparks.setChecked(self.current_config.get('smear_sparks', False))
+        chk_sparks.toggled.connect(lambda v: (self._update_local('smear_sparks', v), self._apply_live()))
+
         lbl_beta = QLabel("Nota: Funcionalidade em testes beta. Pode apresentar instabilidade.")
         lbl_beta.setStyleSheet("color: #808080; font-style: italic; font-size: 11px; margin-left: 20px;")
 
@@ -84,8 +126,16 @@ class SettingsDialog(QDialog):
         editor_layout.addWidget(chk_autocomplete)
         editor_layout.addWidget(lbl_delay)
         editor_layout.addWidget(slider_delay)
+        editor_layout.addWidget(lbl_smear_title)
+        editor_layout.addWidget(lbl_preset)
+        editor_layout.addWidget(self.combo_preset)
         editor_layout.addWidget(lbl_stiffness)
-        editor_layout.addWidget(slider_stiffness)
+        editor_layout.addWidget(self.slider_stiffness)
+        editor_layout.addWidget(lbl_opacity)
+        editor_layout.addWidget(slider_opacity)
+        editor_layout.addWidget(chk_sparks)
+        editor_layout.addWidget(lbl_glow)
+        editor_layout.addLayout(glow_layout)
         editor_layout.addWidget(lbl_beta)
         editor_layout.addStretch()
 
@@ -175,6 +225,28 @@ class SettingsDialog(QDialog):
 
     def _update_local(self, key, value):
         self.current_config[key] = value
+
+    def _on_preset_changed(self, text):
+        self._update_local("smear_physics_preset", text)
+        # Atualiza a rigidez baseada no preset
+        defaults = {"Default": 0.6, "Gelatina": 0.2, "Elástico": 0.4, "Rígido": 0.8}
+        if text in defaults:
+            new_stiffness = defaults[text]
+            self._update_local("smear_stiffness", new_stiffness)
+            self.slider_stiffness.setValue(int(new_stiffness * 100))
+        self._apply_live()
+
+    def _pick_glow_color(self):
+        current = self.current_config.get("smear_glow_color")
+        color = QColorDialog.getColor(QColor(current) if current else Qt.white, self, "Cor do Glow")
+        if color.isValid():
+            hex_color = color.name()
+            self._update_local("smear_glow_color", hex_color)
+            self._update_glow_btn_style(hex_color)
+            self._apply_live()
+
+    def _update_glow_btn_style(self, color_hex):
+        self.btn_glow.setStyleSheet(f"background-color: {color_hex if color_hex else '#555'}; border: 1px solid #777;")
 
     def _apply_live(self):
         self.config_manager.config_changed.emit(self.current_config)

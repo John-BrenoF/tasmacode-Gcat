@@ -10,10 +10,18 @@ import random
 class SmearRenderer:
     def __init__(self):
         self.cursor_color = QColor(0, 255, 0)
+        self.glow_color = None
         self.mode = 'solid'
+        self.opacity = 1.0
         
     def set_color(self, color: QColor):
         self.cursor_color = color
+        
+    def set_opacity(self, opacity: float):
+        self.opacity = max(0.0, min(1.0, opacity))
+        
+    def set_glow_color(self, color: QColor | None):
+        self.glow_color = color
         
     def set_mode(self, mode: str):
         self.mode = mode
@@ -37,6 +45,7 @@ class SmearRenderer:
         # Cria efeito de fade com múltiplas camadas
         for i in range(5):
             alpha = 255 - (i * 40)
+            alpha = int(alpha * self.opacity) # Aplica opacidade global
             color = QColor(self.cursor_color)
             color.setAlpha(alpha)
             
@@ -57,8 +66,8 @@ class SmearRenderer:
         # Efeito de Glow (Brilho)
         radius = 40
         gradient = QRadialGradient(center, radius)
-        glow_color = QColor(self.cursor_color)
-        glow_color.setAlpha(100) # Centro semi-transparente
+        glow_color = QColor(self.glow_color if self.glow_color else self.cursor_color)
+        glow_color.setAlpha(int(100 * self.opacity)) # Centro semi-transparente com opacidade
         gradient.setColorAt(0, glow_color)
         gradient.setColorAt(1, QColor(0, 0, 0, 0)) # Borda transparente
         
@@ -69,7 +78,7 @@ class SmearRenderer:
         # Desenha partículas aleatórias dentro da área do rastro
         # Cria um efeito de "poeira" mágica seguindo o cursor
         for i in range(15):
-            alpha = random.randint(50, 200)
+            alpha = int(random.randint(50, 200) * self.opacity)
             color = QColor(self.cursor_color)
             color.setAlpha(alpha)
             painter.setPen(Qt.NoPen)
@@ -86,6 +95,17 @@ class SmearRenderer:
             
             size = random.uniform(1, 4)
             painter.drawEllipse(pt + QPointF(jitter_x, jitter_y), size, size)
+            
+    def render_sparks(self, painter: QPainter, sparks: List[dict]):
+        """Renderiza as faíscas de digitação."""
+        painter.setPen(Qt.NoPen)
+        for spark in sparks:
+            color = QColor(spark['color'])
+            alpha = int(255 * spark['life'] * self.opacity)
+            color.setAlpha(alpha)
+            painter.setBrush(QBrush(color))
+            size = spark['size'] * spark['life']
+            painter.drawEllipse(QPointF(spark['x'], spark['y']), size, size)
             
     def _scale_points(self, points: List[QPointF], factor: float) -> List[QPointF]:
         """Escala pontos em relação ao centro"""
