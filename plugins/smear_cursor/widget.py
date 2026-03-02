@@ -4,7 +4,7 @@ Responsabilidade: Integrar o smear cursor com QTextEdit
 """
 from PySide6.QtWidgets import QTextEdit, QWidget
 from PySide6.QtCore import Qt, QTimer, Signal, QRect
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPainter, QColor
 from .physics import SpringPhysics
 from .renderer import SmearRenderer
 from .colors import ColorManager
@@ -27,12 +27,19 @@ class SmearCursorWidget(QWidget):
         self.timer = QTimer()
         self.timer.timeout.connect(self._update_animation)
         self.timer.start(self.config.time_interval)
+        self.enabled = True
         
         # Conecta ao sinal de movimento do cursor do editor
         self.editor.cursor_moved.connect(self._on_cursor_moved)
         
         self.animating = False
         
+    def set_enabled(self, state: bool):
+        self.enabled = state
+        self.setVisible(state)
+        if not state:
+            self.animating = False
+
     def move_cursor_to(self, rect: QRect):
         """Inicia animação para nova posição"""
         # Ajusta o rect para coordenadas locais do widget
@@ -58,15 +65,20 @@ class SmearCursorWidget(QWidget):
                 
     def paintEvent(self, event):
         """Renderiza o smear cursor"""
-        if not self.animating:
+        if not self.animating or not self.enabled:
             return
+            
+        # Atualiza a cor baseada no tema do editor (accent color)
+        if hasattr(self.editor, 'theme') and self.editor.theme:
+            accent_color = self.editor.theme.get_color("accent")
+            self.renderer.set_color(QColor(accent_color))
             
         painter = QPainter(self)
         self.renderer.render_smear(painter, self.physics.current_corners)
 
     def _on_cursor_moved(self):
         """Calcula a posição do cursor no CodeEditor e atualiza o efeito."""
-        if not self.editor.buffer or not self.editor.buffer.cursors:
+        if not self.enabled or not self.editor.buffer or not self.editor.buffer.cursors:
             return
             
         cursor = self.editor.buffer.cursors[-1]

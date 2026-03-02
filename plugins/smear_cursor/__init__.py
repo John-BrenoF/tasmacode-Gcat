@@ -8,6 +8,7 @@ from .config import SmearConfig
 def plugin_main(api):
     """Ponto de entrada do plugin."""
     api.log("Smear Cursor Plugin inicializado!")
+    api.add_menu_action("Ativar/Desativar Smear Cursor", toggle_smear)
     
     # Tenta anexar ao editor ativo se houver um
     editor = api.get_active_editor()
@@ -21,4 +22,12 @@ def attach_to_editor(editor):
         editor.smear_widget = SmearCursorWidget(editor)
         editor.smear_widget.show()
         editor.smear_widget.raise_()
-        api_log = getattr(editor, "api_log", print) # Fallback log
+
+def toggle_smear(api):
+    """Alterna o estado do efeito no editor ativo."""
+    editor = api.get_active_editor()
+    if editor and hasattr(editor, 'smear_widget'):
+        widget = editor.smear_widget
+        widget.set_enabled(not widget.enabled)
+        status = "Ativado" if widget.enabled else "Desativado"
+        api.log(f"Smear Cursor {status}")

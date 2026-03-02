@@ -5,14 +5,19 @@
     "sidebar_bg": "#dfe5ec",
     "statusbar_bg": "#dfe5ec",
     "accent": "#b8c2cf",
-
     "line_highlight": "#dde3ea",
     "indent_guide": "#c4ccd6",
     "bracket_match": "#00000040",
     "minimap_overlay": "#00000015",
-
     "gutter_bg": "#d6dde6",
     "gutter_fg": "#4f5b66",
-
-    "border_color": "#000000"
+    "keyword_color": "#ff79c6",
+    "builtin_color": "#8be9fd",
+    "string_color": "#f1fa8c",
+    "comment_color": "#6272a4",
+    "class_color": "#50fa7b",
+    "function_color": "#50fa7b",
+    "operator_color": "#ff79c6",
+    "border_color": "#000000",
+    "false": "#707070"
 }

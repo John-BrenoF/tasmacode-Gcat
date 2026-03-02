@@ -10,6 +10,9 @@ class SmearRenderer:
     def __init__(self):
         self.cursor_color = QColor(0, 255, 0)
         
+    def set_color(self, color: QColor):
+        self.cursor_color = color
+        
     def render_smear(self, painter: QPainter, corners: List[List[float]]):
         """Renderiza o smear cursor usando QPainter"""
         if not corners or len(corners) < 4:
