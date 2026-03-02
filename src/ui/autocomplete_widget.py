@@ -35,6 +35,29 @@ class DocumentationTooltip(QLabel):
         self.show()
         self.raise_()
 
+class ParameterHintWidget(QLabel):
+    """Widget flutuante para mostrar dicas de parâmetros de função."""
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        self.setStyleSheet("""
+            background-color: #252526;
+            color: #cccccc;
+            border: 1px solid #007acc;
+            padding: 4px 8px;
+            font-family: 'Consolas', 'Monospace';
+            font-size: 12px;
+            border-radius: 4px;
+        """)
+        self.hide()
+
+    def show_hint(self, func_name, params, pos):
+        content = f"<span style='color: #4fc1ff; font-weight: bold;'>{func_name}</span>({params})"
+        self.setText(content)
+        self.adjustSize()
+        self.move(pos)
+        self.show()
+        self.raise_()
+
 class SuggestionItemWidget(QWidget):
     """Widget customizado para um item da lista de autocomplete, com layout rico."""
     def __init__(self, suggestion: dict, parent=None):

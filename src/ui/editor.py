@@ -2,7 +2,7 @@ from PySide6.QtWidgets import QAbstractScrollArea
 from PySide6.QtCore import Signal, Qt, QTimer, QRect, QPoint
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen
 from plugins.line_number_area import LineNumberArea
-from .autocomplete_widget import AutocompleteWidget
+from .autocomplete_widget import AutocompleteWidget, ParameterHintWidget
 
 class CodeEditor(QAbstractScrollArea):
     """Canvas de edição de código com renderização customizada.
@@ -76,6 +76,14 @@ class CodeEditor(QAbstractScrollArea):
         if self.autocomplete_manager and not self.autocomplete_widget:
             self.autocomplete_widget = AutocompleteWidget(self)
             self.autocomplete_widget.suggestion_selected.connect(self._on_suggestion_selected)
+            
+            # Inicializa widget de dicas de parâmetros
+            if not hasattr(self, 'parameter_hint_widget'):
+                self.parameter_hint_widget = ParameterHintWidget(self)
+                
+            # Conecta sinais para atualização de dicas
+            self.text_changed.connect(self._update_parameter_hint)
+            self.cursor_moved.connect(self._update_parameter_hint)
 
     def set_input_mapper(self, mapper):
         self.input_mapper = mapper
@@ -207,6 +215,38 @@ class CodeEditor(QAbstractScrollArea):
             point.setX(int(self.width() - widget_width - 20))
         
         self.autocomplete_widget.move(point)
+
+    def _update_parameter_hint(self):
+        """Verifica e exibe dicas de parâmetros se estiver dentro de uma função."""
+        if not self.buffer or not self.autocomplete_manager: return
+        
+        cursor = self.buffer.cursors[-1]
+        file_path = self.property("file_path") or ""
+        
+        hint = self.autocomplete_manager.get_parameter_hint(self.buffer, cursor.line, cursor.col, file_path)
+        
+        if hint:
+            # Calcula posição (acima da linha atual)
+            scroll_y = self.verticalScrollBar().value()
+            x_px = cursor.col * self.char_width
+            y_px = (cursor.line * self.line_height) - scroll_y
+            
+            # Mapeia para coordenadas do widget
+            point = self.viewport().mapTo(self, QPoint(int(x_px), int(y_px)))
+            
+            # Posiciona um pouco acima da linha
+            point.setY(point.y() - 25)
+            # Ajusta X para não sair da tela pela esquerda
+            point.setX(max(5, point.x()))
+            
+            # Se o autocomplete estiver visível, move a dica mais para cima
+            if self.autocomplete_widget and self.autocomplete_widget.isVisible():
+                point.setY(point.y() - self.autocomplete_widget.height() - 5)
+            
+            self.parameter_hint_widget.show_hint(hint['name'], hint['params'], point)
+        else:
+            if hasattr(self, 'parameter_hint_widget'):
+                self.parameter_hint_widget.hide()
 
     def _on_suggestion_selected(self, suggestion: dict):
         """Substitui a palavra atual pela sugestão selecionada."""

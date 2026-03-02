@@ -176,3 +176,107 @@ class AutocompleteManager:
     def should_trigger(self, char: str) -> bool:
         """Verifica se o caractere deve acionar autocomplete."""
         return char in self.trigger_chars or (char and (char.isalnum() or char == '_'))
+
+    def get_parameter_hint(self, buffer, line, col, file_path: str = "") -> dict | None:
+        """
+        Verifica se o cursor está dentro de uma chamada de função e retorna a assinatura.
+        """
+        # 1. Identificar se estamos dentro de parênteses
+        # Simplificação: olhar apenas para a linha atual e anteriores próximas
+        start_line = max(0, line - 10)
+        text_block = "\n".join(buffer.get_lines(start_line, line + 1))
+        
+        # Calcular offset do cursor dentro do text_block
+        lines = buffer.get_lines(start_line, line + 1)
+        cursor_offset = 0
+        for i in range(len(lines) - 1):
+            cursor_offset += len(lines[i]) + 1 # +1 para \n
+        cursor_offset += col
+        
+        # Busca para trás por '(' não fechado
+        balance = 0
+        func_name = ""
+        
+        # Limite de busca para trás para performance
+        search_limit = max(0, cursor_offset - 1000)
+        
+        for i in range(cursor_offset - 1, search_limit - 1, -1):
+            if i >= len(text_block): continue
+            char = text_block[i]
+            if char == ')':
+                balance += 1
+            elif char == '(':
+                if balance > 0:
+                    balance -= 1
+                else:
+                    # Encontramos o '(' de abertura
+                    # Agora pegamos o nome da função antes dele
+                    # Ignora espaços
+                    j = i - 1
+                    while j >= 0 and text_block[j].isspace():
+                        j -= 1
+                    
+                    # Pega identificador
+                    k = j
+                    while k >= 0 and (text_block[k].isalnum() or text_block[k] == '_'):
+                        k -= 1
+                    
+                    func_name = text_block[k+1 : j+1]
+                    break
+        
+        if not func_name:
+            return None
+            
+        # 2. Buscar assinatura da função
+        lang = self._get_language(file_path)
+        signature = self._find_signature(func_name, buffer, lang)
+        
+        if signature:
+            return {
+                "name": func_name,
+                "params": signature
+            }
+        return None
+
+    def _find_signature(self, func_name, buffer, lang):
+        # 1. Hardcoded signatures (exemplo)
+        signatures = {
+            'python': {
+                'print': 'value, ..., sep=" ", end="\\n"',
+                'len': 'obj',
+                'range': 'start, stop[, step]',
+                'open': 'file, mode="r", buffering=-1, ...',
+                'super': 'type, obj_or_type',
+                'int': 'x, base=10',
+                'str': 'object=""',
+                'list': 'iterable=()',
+                'dict': 'mapping=(), **kwargs'
+            },
+            'javascript': {
+                'console.log': 'message, ...',
+                'alert': 'message',
+                'parseInt': 'string, radix',
+                'setTimeout': 'function, milliseconds, param1, ...'
+            }
+        }
+        
+        if lang in signatures and func_name in signatures[lang]:
+            return signatures[lang][func_name]
+            
+        # 2. Busca no buffer (definições locais)
+        all_text = buffer.get_text()
+        
+        if lang == 'python':
+            pattern = r'def\s+' + re.escape(func_name) + r'\s*\((.*?)\)'
+        elif lang == 'javascript':
+            pattern = r'function\s+' + re.escape(func_name) + r'\s*\((.*?)\)'
+        else:
+            return None
+            
+        match = re.search(pattern, all_text, re.DOTALL)
+        if match:
+            params = match.group(1).replace('\n', '').strip()
+            params = re.sub(r'\s+', ' ', params) # Normaliza espaços
+            return params
+            
+        return None
