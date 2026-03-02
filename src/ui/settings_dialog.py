@@ -61,6 +61,12 @@ class SettingsDialog(QDialog):
         chk_autocomplete = QCheckBox("Habilitar Autocomplete (Beta)")
         chk_autocomplete.setChecked(self.current_config.get('enable_autocomplete', False))
         chk_autocomplete.toggled.connect(lambda v: (self._update_local('enable_autocomplete', v), self._apply_live()))
+
+        lbl_delay = QLabel(f"Atraso do Autocomplete (ms): {self.current_config.get('autocomplete_delay', 300)}")
+        slider_delay = QSlider(Qt.Orientation.Horizontal)
+        slider_delay.setRange(0, 2000)
+        slider_delay.setValue(self.current_config.get('autocomplete_delay', 300))
+        slider_delay.valueChanged.connect(lambda v: (lbl_delay.setText(f"Atraso do Autocomplete (ms): {v}"), self._update_local('autocomplete_delay', v)))
         
         lbl_beta = QLabel("Nota: Funcionalidade em testes beta. Pode apresentar instabilidade.")
         lbl_beta.setStyleSheet("color: #808080; font-style: italic; font-size: 11px; margin-left: 20px;")
@@ -70,6 +76,8 @@ class SettingsDialog(QDialog):
         editor_layout.addWidget(chk_lines)
         editor_layout.addWidget(chk_indent)
         editor_layout.addWidget(chk_autocomplete)
+        editor_layout.addWidget(lbl_delay)
+        editor_layout.addWidget(slider_delay)
         editor_layout.addWidget(lbl_beta)
         editor_layout.addStretch()
 

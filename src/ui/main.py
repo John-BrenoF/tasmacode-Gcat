@@ -2,7 +2,7 @@ import sys
 import os
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QSplitter, QFileDialog, QInputDialog, QMessageBox, QMenu
 from PySide6.QtGui import QKeySequence
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QTextCursor, QAction, QKeySequence, QCursor
 from PySide6.QtCore import QDir
 # Ajuste de Path para garantir que imports funcionem a partir da raiz
@@ -103,6 +103,10 @@ class JCodeMainWindow(QMainWindow):
         # Hook de inicialização
         self.extension_bridge.trigger_hook("on_app_start")
         self._update_user_avatar()
+
+        self.autocomplete_timer = QTimer()
+        self.autocomplete_timer.setSingleShot(True)
+        self.autocomplete_timer.timeout.connect(self._perform_autocomplete)
 
     def closeEvent(self, event):
         """Salva a sessão ao fechar."""
@@ -473,7 +477,8 @@ class JCodeMainWindow(QMainWindow):
             "server_address": "Endereço do Servidor Local",
             "live_server_port": "Porta do Live Server",
             "live_server_open_browser": "Abrir Navegador (Live Server)",
-            "enable_autocomplete": "Habilitar Autocomplete (Beta)"
+            "enable_autocomplete": "Habilitar Autocomplete (Beta)",
+            "autocomplete_delay": "Atraso do Autocomplete"
         }
 
         for key, desc in setting_descriptions.items():
@@ -543,8 +548,15 @@ class JCodeMainWindow(QMainWindow):
         if not editor or editor is not self.active_editor:
             return
 
-        # Verifica se o autocomplete está habilitado nas configurações
         if not getattr(editor, "autocomplete_enabled", False):
+            return
+
+        delay = self.config_manager.get("autocomplete_delay")
+        self.autocomplete_timer.start(delay)
+
+    def _perform_autocomplete(self):
+        editor = self.active_editor
+        if not editor:
             return
 
         if not editor.buffer or not editor.autocomplete_manager:

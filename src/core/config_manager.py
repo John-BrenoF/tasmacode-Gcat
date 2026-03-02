@@ -25,7 +25,8 @@ class ConfigManager(QObject):
             "server_address": "http://localhost:5000",
             "live_server_port": 0,
             "live_server_open_browser": True,
-            "enable_autocomplete": False
+            "enable_autocomplete": False,
+            "autocomplete_delay": 300
         }
         self.config = self.load_config()
 

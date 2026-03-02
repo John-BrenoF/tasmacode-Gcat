@@ -190,24 +190,21 @@ class CodeEditor(QAbstractScrollArea):
         
         cursor = self.buffer.cursors[-1]
         
-        # Calcula posição em coordenadas do viewport
-        # x_px = posição horizontal do cursor
-        # y_px = posição vertical do topo da linha do cursor
         scroll_y = self.verticalScrollBar().value()
         x_px = cursor.col * self.char_width
         y_px = (cursor.line * self.line_height) - scroll_y
         
-        # Atualiza o widget primeiro para ter o tamanho correto
         self.autocomplete_widget.show_suggestions(suggestions)
         
-        # Mapeia para as coordenadas do widget CodeEditor
         point = self.viewport().mapTo(self, QPoint(int(x_px), int(y_px + self.line_height)))
         
-        # Verifica se o widget vai sair da tela (embaixo)
         widget_height = self.autocomplete_widget.height()
+        widget_width = self.autocomplete_widget.width()
+
         if point.y() + widget_height > self.height():
-            # Posiciona ACIMA do cursor
             point.setY(int(point.y() - widget_height - self.line_height))
+        if point.x() + widget_width > self.width():
+            point.setX(int(self.width() - widget_width - 20))
         
         self.autocomplete_widget.move(point)
 
