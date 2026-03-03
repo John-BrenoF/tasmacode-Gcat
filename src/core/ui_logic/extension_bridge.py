@@ -15,13 +15,15 @@ class EditorAPI:
     
     Encapsula o acesso ao Core e UI, prevenindo que plugins quebrem a aplicação.
     """
-    def __init__(self, insert_fn, get_text_fn, add_menu_fn, log_fn, get_editor_fn=None, update_config_fn=None):
+    def __init__(self, insert_fn, get_text_fn, add_menu_fn, log_fn, get_editor_fn=None, update_config_fn=None, get_config_fn=None, get_project_root_fn=None):
         self._insert_fn = insert_fn
         self._get_text_fn = get_text_fn
         self._add_menu_fn = add_menu_fn
         self._log_fn = log_fn
         self._get_editor_fn = get_editor_fn
         self._update_config_fn = update_config_fn
+        self._get_config_fn = get_config_fn
+        self._get_project_root_fn = get_project_root_fn
 
     def insert_text(self, text: str):
         if self._insert_fn: self._insert_fn(text)
@@ -46,6 +48,18 @@ class EditorAPI:
         """Atualiza e salva uma configuração global."""
         if self._update_config_fn:
             self._update_config_fn(key, value)
+
+    def get_config(self, key: str, default: Any = None) -> Any:
+        """Recupera uma configuração global."""
+        if self._get_config_fn:
+            return self._get_config_fn(key, default)
+        return default
+
+    def get_project_root(self) -> str | None:
+        """Retorna o caminho raiz do projeto atual."""
+        if self._get_project_root_fn:
+            return self._get_project_root_fn()
+        return None
 
 class ExtensionBridge(QObject):
     """Gerencia o carregamento de plugins e o sistema de Hooks.
@@ -158,11 +172,11 @@ class ExtensionBridge(QObject):
             logger.error(f"Erro ao carregar pacote {package_name}: {e}")
             self.plugin_error.emit(package_name, str(e))
 
-    def activate_plugins(self, insert_fn, get_text_fn, add_menu_fn, log_fn, get_editor_fn=None, update_config_fn=None) -> None:
+    def activate_plugins(self, insert_fn, get_text_fn, add_menu_fn, log_fn, get_editor_fn=None, update_config_fn=None, get_config_fn=None, get_project_root_fn=None) -> None:
         """Fase 2: Ativa todos os plugins carregados, injetando a API."""
         for name, module in self._loaded_modules.items():
             try:
-                api = EditorAPI(insert_fn, get_text_fn, add_menu_fn, log_fn, get_editor_fn, update_config_fn)
+                api = EditorAPI(insert_fn, get_text_fn, add_menu_fn, log_fn, get_editor_fn, update_config_fn, get_config_fn, get_project_root_fn)
                 module.plugin_main(api)
                 self._plugins[name] = module
                 self.plugin_loaded.emit(name)

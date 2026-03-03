@@ -13,7 +13,7 @@ if root_dir not in sys.path:
 
 from src.core.editor_logic.buffer import DocumentBuffer
 from src.core.editor_logic.file_manager import FileManager
-from src.core.ui_logic.extension_bridge import ExtensionBridge
+from src.core.ui_logic.extension_bridge import ExtensionBridge, EditorAPI
 from src.core.editor_logic.autocomplete_manager import AutocompleteManager
 from src.core.editor_logic.search_manager import SearchManager
 from src.core.syntax_highlighter import SyntaxHighlighter
@@ -378,6 +378,7 @@ class JCodeMainWindow(QMainWindow):
         r.register("view.find", self._show_search_panel)
         r.register("view.switch_project", self._show_project_launcher)
         r.register("edit.rename", self._quick_rename)
+        r.register("view.toggle_ai_chat", self._toggle_ai_chat)
         r.register("file.save", self._save_file)
         r.register("file.save_as", self._save_file_as)
 
@@ -612,6 +613,55 @@ class JCodeMainWindow(QMainWindow):
             editor = self.editor_group.tab_widget.widget(i)
             if isinstance(editor, CodeEditor):
                 editor.update_settings(config)
+
+    def _toggle_ai_chat(self):
+        """Abre/fecha o painel de chat IA."""
+        if not hasattr(self, 'ai_chat_widget'):
+            # Cria o widget na primeira chamada
+            from plugins.code_ia.ai_assistant import AIChatWidget
+            # Aqui, _create_editor_api é chamado SEM argumentos
+            self.ai_chat_widget = AIChatWidget(self._create_editor_api())
+
+            # Adiciona ao layout principal (como uma nova sidebar)
+            self.ai_splitter = QSplitter(Qt.Orientation.Horizontal)
+            self.ai_splitter.addWidget(self.main_splitter)
+            self.ai_splitter.addWidget(self.ai_chat_widget)
+            self.ai_splitter.setStretchFactor(0, 4)
+            self.ai_splitter.setStretchFactor(1, 1)
+            self.setCentralWidget(self.ai_splitter)
+
+            # Começa oculto
+            self.ai_chat_widget.hide()
+
+        # Alterna visibilidade
+        self.ai_chat_widget.setVisible(not self.ai_chat_widget.isVisible())
+        if self.ai_chat_widget.isVisible():
+            self.ai_chat_widget.input_field.setFocus()
+
+    def _create_editor_api(self):
+        """Cria uma instância da API para uso interno (ex: Chat IA)."""
+        def update_config_wrapper(key, value):
+            self.config_manager.config[key] = value
+            self.config_manager.save_config(self.config_manager.config)
+
+        def get_config_wrapper(key, default=None):
+            return self.config_manager.get(key) or default
+
+        def get_project_root_wrapper():
+            if self.sidebar and self.sidebar.stack.currentWidget() == self.sidebar.tree:
+                return self.sidebar.file_model.rootPath()
+            return None
+
+        return EditorAPI(
+            insert_fn=self._api_insert_text,
+            get_text_fn=self._api_get_text,
+            add_menu_fn=self._api_add_menu,
+            log_fn=self._api_log,
+            get_editor_fn=lambda: self.active_editor,
+            update_config_fn=update_config_wrapper,
+            get_config_fn=get_config_wrapper,
+            get_project_root_fn=get_project_root_wrapper
+        )
 
     def _toggle_sidebar(self):
         print("DEBUG: Atalho Ctrl+B acionado, alternando sidebar.")
@@ -1118,6 +1168,14 @@ class JCodeMainWindow(QMainWindow):
             # Atualiza a configuração e salva no disco
             self.config_manager.config[key] = value
             self.config_manager.save_config(self.config_manager.config)
+            
+        def get_config_wrapper(key, default=None):
+            return self.config_manager.get(key) or default
+
+        def get_project_root_wrapper():
+            if self.sidebar and self.sidebar.stack.currentWidget() == self.sidebar.tree:
+                return self.sidebar.file_model.rootPath()
+            return None
 
         self.extension_bridge.activate_plugins(
             insert_fn=self._api_insert_text,
@@ -1125,7 +1183,9 @@ class JCodeMainWindow(QMainWindow):
             add_menu_fn=self._api_add_menu,
             log_fn=self._api_log,
             get_editor_fn=lambda: self.active_editor,
-            update_config_fn=update_config_wrapper
+            update_config_fn=update_config_wrapper,
+            get_config_fn=get_config_wrapper,
+            get_project_root_fn=get_project_root_wrapper
         )
 
     # --- Implementação da EditorAPI ---

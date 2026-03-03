@@ -41,7 +41,8 @@ class InputMapper(QObject):
             # Rename
             "F2": "edit.rename",
             # Project
-            "Ctrl+R": "view.switch_project"
+            "Ctrl+R": "view.switch_project",
+             "Ctrl+H": "view.toggle_ai_chat"
         }
 
     def handle_key(self, event: QKeyEvent) -> bool:
