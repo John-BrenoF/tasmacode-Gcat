@@ -509,21 +509,21 @@ class RightSidebar(QWidget):
         
         git_layout.addWidget(header_frame)
         
-        # --- Seção de Arquivos Modificados (Collapsible) ---
-        self.files_section = QWidget()
-        files_layout = QVBoxLayout(self.files_section)
-        files_layout.setContentsMargins(5, 5, 5, 5)
-        files_layout.setSpacing(5)
+        # --- Seção de Staged Changes (Collapsible) ---
+        self.staged_section = QWidget()
+        staged_layout = QVBoxLayout(self.staged_section)
+        staged_layout.setContentsMargins(5, 5, 5, 5)
+        staged_layout.setSpacing(5)
         
-        self.btn_toggle_files = QToolButton()
-        self.btn_toggle_files.setText(" Arquivos Modificados (0)")
-        self.btn_toggle_files.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.btn_toggle_files.setArrowType(Qt.DownArrow)
-        self.btn_toggle_files.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.btn_toggle_files.clicked.connect(self._toggle_files)
+        self.btn_toggle_staged = QToolButton()
+        self.btn_toggle_staged.setText(" Staged Changes (0)")
+        self.btn_toggle_staged.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btn_toggle_staged.setArrowType(Qt.DownArrow)
+        self.btn_toggle_staged.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.btn_toggle_staged.clicked.connect(lambda: self._toggle_section(self.staged_list, self.btn_toggle_staged))
         
-        self.file_list = QListWidget()
-        self.file_list.setStyleSheet("""
+        self.staged_list = QListWidget()
+        self.staged_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid #333333; 
                 color: #9cdcfe;
@@ -540,15 +540,56 @@ class RightSidebar(QWidget):
                 background-color: #2a2d2e;
             }
         """)
-        self.file_list.setMaximumHeight(250)
-        self.file_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.file_list.customContextMenuRequested.connect(self._show_file_context_menu)
-        self.file_list.itemDoubleClicked.connect(lambda item: self._view_current_diff(item.text()))
+        self.staged_list.setMaximumHeight(150)
+        self.staged_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.staged_list.customContextMenuRequested.connect(lambda pos: self._show_file_context_menu(pos, is_staged=True))
+        self.staged_list.itemDoubleClicked.connect(lambda item: self._view_diff(item.data(Qt.UserRole), is_staged=True))
         
-        files_layout.addWidget(self.btn_toggle_files)
-        files_layout.addWidget(self.file_list)
+        staged_layout.addWidget(self.btn_toggle_staged)
+        staged_layout.addWidget(self.staged_list)
         
-        git_layout.addWidget(self.files_section)
+        git_layout.addWidget(self.staged_section)
+
+        # --- Seção de Unstaged Changes (Collapsible) ---
+        self.unstaged_section = QWidget()
+        unstaged_layout = QVBoxLayout(self.unstaged_section)
+        unstaged_layout.setContentsMargins(5, 5, 5, 5)
+        unstaged_layout.setSpacing(5)
+        
+        self.btn_toggle_unstaged = QToolButton()
+        self.btn_toggle_unstaged.setText(" Changes (0)")
+        self.btn_toggle_unstaged.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btn_toggle_unstaged.setArrowType(Qt.DownArrow)
+        self.btn_toggle_unstaged.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.btn_toggle_unstaged.clicked.connect(lambda: self._toggle_section(self.unstaged_list, self.btn_toggle_unstaged))
+        
+        self.unstaged_list = QListWidget()
+        self.unstaged_list.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #333333; 
+                color: #9cdcfe;
+                border-radius: 4px;
+            }
+            QListWidget::item {
+                padding: 4px;
+            }
+            QListWidget::item:selected {
+                background-color: #094771;
+                color: white;
+            }
+            QListWidget::item:hover {
+                background-color: #2a2d2e;
+            }
+        """)
+        self.unstaged_list.setMaximumHeight(200)
+        self.unstaged_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.unstaged_list.customContextMenuRequested.connect(lambda pos: self._show_file_context_menu(pos, is_staged=False))
+        self.unstaged_list.itemDoubleClicked.connect(lambda item: self._view_diff(item.data(Qt.UserRole), is_staged=False))
+        
+        unstaged_layout.addWidget(self.btn_toggle_unstaged)
+        unstaged_layout.addWidget(self.unstaged_list)
+        
+        git_layout.addWidget(self.unstaged_section)
         
         # Área do Gráfico (Scrollável)
         scroll = QScrollArea()
@@ -759,56 +800,79 @@ class RightSidebar(QWidget):
     def _open_commit_details(self, commit_data):
         CommitDetailsDialog(self.current_repo, commit_data, self.git_logic, self).exec()
 
-    def _toggle_files(self):
+    def _toggle_section(self, list_widget, button):
         """Expande ou recolhe a lista de arquivos."""
-        visible = self.file_list.isVisible()
-        self.file_list.setVisible(not visible)
-        self.btn_toggle_files.setArrowType(Qt.RightArrow if visible else Qt.DownArrow)
+        visible = list_widget.isVisible()
+        list_widget.setVisible(not visible)
+        button.setArrowType(Qt.RightArrow if visible else Qt.DownArrow)
 
     def _refresh_files(self):
         """Atualiza a lista de arquivos modificados."""
         if not self.current_repo: return
-        files = self.git_logic.get_changed_files(self.current_repo)
-        stats = self.git_logic.get_files_stats(self.current_repo)
-        self.file_list.clear()
         
         icon = self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
         text_color = self.theme.get("foreground", "#cccccc")
-        for f in files:
-            added, removed = 0, 0
-            if f in stats:
-                added, removed = stats[f]
-            
-            item = QListWidgetItem(self.file_list)
-            item.setData(Qt.UserRole, f) # Armazena o nome real do arquivo
-            
+
+        # --- Staged Files ---
+        staged_files = self.git_logic.get_staged_files(self.current_repo)
+        staged_stats = self.git_logic.get_files_stats(self.current_repo, staged=True)
+        self.staged_list.clear()
+        
+        for f in staged_files:
+            added, removed = staged_stats.get(f, (0, 0))
+            item = QListWidgetItem(self.staged_list)
+            item.setData(Qt.UserRole, f)
             widget = FileListItemWidget(icon, f, added, removed, text_color)
             item.setSizeHint(widget.sizeHint())
-            self.file_list.setItemWidget(item, widget)
-            
-        self.btn_toggle_files.setText(f" Arquivos Modificados ({len(files)})")
+            self.staged_list.setItemWidget(item, widget)
+        self.btn_toggle_staged.setText(f" Staged Changes ({len(staged_files)})")
 
-    def _show_file_context_menu(self, pos):
-        item = self.file_list.itemAt(pos)
+        # --- Unstaged Files ---
+        unstaged_files = self.git_logic.get_unstaged_files(self.current_repo)
+        unstaged_stats = self.git_logic.get_files_stats(self.current_repo, staged=False)
+        self.unstaged_list.clear()
+        
+        for f in unstaged_files:
+            added, removed = unstaged_stats.get(f, (0, 0))
+            item = QListWidgetItem(self.unstaged_list)
+            item.setData(Qt.UserRole, f)
+            widget = FileListItemWidget(icon, f, added, removed, text_color)
+            item.setSizeHint(widget.sizeHint())
+            self.unstaged_list.setItemWidget(item, widget)
+        self.btn_toggle_unstaged.setText(f" Changes ({len(unstaged_files)})")
+
+    def _show_file_context_menu(self, pos, is_staged):
+        list_widget = self.staged_list if is_staged else self.unstaged_list
+        item = list_widget.itemAt(pos)
         if not item: return
         file_path = item.data(Qt.UserRole) # Recupera o caminho limpo
         
         menu = QMenu(self)
         menu.setStyleSheet("QMenu { background-color: #252526; color: #cccccc; } QMenu::item:selected { background-color: #007acc; }")
         
-        menu.addAction("Ver Diff (vs HEAD)", lambda: self._view_current_diff(file_path))
-        menu.addAction("Adicionar ao Stage (+)", lambda: self._stage_file(file_path))
-        menu.addAction("Remover do Stage (-)", lambda: self._unstage_file(file_path))
-        menu.addSeparator()
-        menu.addAction("Descartar Alterações", lambda: self._discard_file_changes(file_path))
+        if is_staged:
+            menu.addAction("Ver Diff (Staged)", lambda: self._view_diff(file_path, is_staged=True))
+            menu.addAction("Remover do Stage (-)", lambda: self._unstage_file(file_path))
+        else:
+            menu.addAction("Ver Diff (Working)", lambda: self._view_diff(file_path, is_staged=False))
+            menu.addAction("Adicionar ao Stage (+)", lambda: self._stage_file(file_path))
+            menu.addSeparator()
+            menu.addAction("Descartar Alterações", lambda: self._discard_file_changes(file_path))
         
-        menu.exec(self.file_list.mapToGlobal(pos))
+        menu.exec(list_widget.mapToGlobal(pos))
 
-    def _view_current_diff(self, file_path):
+    def _view_diff(self, file_path, is_staged):
         if not self.current_repo: return
-        diff = self.git_logic.get_working_diff(self.current_repo, file_path)
+        
+        if is_staged:
+            diff = self.git_logic.get_staged_diff(self.current_repo, file_path)
+            title = f"{file_path} (Staged)"
+        else:
+            diff = self.git_logic.get_working_diff(self.current_repo, file_path)
+            title = f"{file_path} (Working Tree)"
+            
         if diff.strip():
-            DiffViewer(diff, f"{file_path} (Working Tree)", self).exec()
+            DiffViewer(diff, title, self).exec()
         else:
             QMessageBox.information(self, "Diff", "O arquivo parece não ter diferenças textuais ou é um arquivo binário/novo.")
 

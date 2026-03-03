@@ -9,7 +9,7 @@ class AboutWindow(QDialog):
     def __init__(self, about_info, root_path, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Sobre {about_info.app_name}")
-        self.setFixedSize(400, 380)
+        self.setFixedSize(400,400)
         self.setStyleSheet("background-color: #252526; color: #cccccc;")
         
         layout = QVBoxLayout(self)

@@ -180,23 +180,48 @@ class GitLogic:
         except:
             return "Não foi possível obter o diff."
 
-    def get_changed_files(self, repo_path: str) -> list[str]:
-        """Retorna lista de arquivos alterados (staged e unstaged)."""
+    def get_staged_files(self, repo_path: str) -> list[str]:
+        """Retorna lista de arquivos na área de stage."""
         try:
-            # --porcelain imprime status de forma parseável e estável
             res = subprocess.run(["git", "status", "--porcelain"], cwd=repo_path, capture_output=True, text=True)
             files = []
             for line in res.stdout.splitlines():
                 if len(line) > 3:
-                    files.append(line[3:]) # Remove o status (ex: "M  ", "?? ") e pega o caminho
+                    status = line[:2]
+                    # Se o primeiro caractere (index) não for espaço nem '?', está staged
+                    if status[0] not in (' ', '?'):
+                        files.append(line[3:])
+            return files
+        except:
+            return []
+
+    def get_unstaged_files(self, repo_path: str) -> list[str]:
+        """Retorna lista de arquivos modificados fora do stage."""
+        try:
+            res = subprocess.run(["git", "status", "--porcelain"], cwd=repo_path, capture_output=True, text=True)
+            files = []
+            for line in res.stdout.splitlines():
+                if len(line) > 3:
+                    status = line[:2]
+                    # Se o segundo caractere (worktree) não for espaço, ou for untracked '??'
+                    if status[1] != ' ' or status == '??':
+                        files.append(line[3:])
             return files
         except:
             return []
 
     def get_working_diff(self, repo_path: str, file_path: str) -> str:
-        """Retorna o diff do arquivo no diretório de trabalho contra o HEAD."""
+        """Retorna o diff do arquivo no diretório de trabalho (vs Index)."""
         try:
-            res = subprocess.run(["git", "diff", "HEAD", "--", file_path], cwd=repo_path, capture_output=True, text=True)
+            res = subprocess.run(["git", "diff", "--", file_path], cwd=repo_path, capture_output=True, text=True)
+            return res.stdout
+        except:
+            return "Não foi possível obter o diff."
+
+    def get_staged_diff(self, repo_path: str, file_path: str) -> str:
+        """Retorna o diff do arquivo no stage (vs HEAD)."""
+        try:
+            res = subprocess.run(["git", "diff", "--cached", "--", file_path], cwd=repo_path, capture_output=True, text=True)
             return res.stdout
         except:
             return "Não foi possível obter o diff."
@@ -224,12 +249,14 @@ class GitLogic:
         except subprocess.CalledProcessError as e:
             return False, f"Erro ao adicionar ao stage: {e.stderr.decode() if e.stderr else str(e)}"
 
-    def get_files_stats(self, repo_path: str) -> dict:
-        """Retorna estatísticas de linhas (+/-) para arquivos modificados (unstaged)."""
+    def get_files_stats(self, repo_path: str, staged: bool = False) -> dict:
+        """Retorna estatísticas de linhas (+/-)."""
         stats = {}
         try:
-            # --numstat retorna: added removed filename
-            res = subprocess.run(["git", "diff", "--numstat"], cwd=repo_path, capture_output=True, text=True)
+            cmd = ["git", "diff", "--numstat"]
+            if staged:
+                cmd.append("--cached")
+            res = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True)
             for line in res.stdout.splitlines():
                 parts = line.split()
                 if len(parts) >= 3:
