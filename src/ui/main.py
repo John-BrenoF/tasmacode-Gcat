@@ -606,6 +606,7 @@ class JCodeMainWindow(QMainWindow):
         self.theme_manager.apply_theme(QApplication.instance())
         
         self.custom_statusbar.apply_theme(self.theme_manager.current_theme)
+        self.right_sidebar.apply_theme(self.theme_manager.current_theme)
         # 2. Editor (Propaga para todas as abas)
         for i in range(self.editor_group.tab_widget.count()):
             editor = self.editor_group.tab_widget.widget(i)

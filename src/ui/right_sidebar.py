@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                QFileDialog, QMessageBox, QFrame, QStackedWidget, QScrollArea, QMenu, 
-                               QInputDialog, QApplication, QStyle, QComboBox, QDialog, QListWidget, QTextEdit)
+                               QInputDialog, QApplication, QStyle, QComboBox, QDialog, QListWidget, QTextEdit, QToolButton, QSizePolicy, QListWidgetItem)
 from PySide6.QtCore import Qt, QRect, QPointF, Signal, QPoint
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPainterPath, QFontMetrics, QCursor
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPainterPath, QFontMetrics, QCursor, QSyntaxHighlighter, QTextCharFormat, QPixmap
 from src.core.git_logic import GitLogic
 
 class CommitTooltip(QLabel):
@@ -30,6 +30,56 @@ class CommitTooltip(QLabel):
         self.move(pos)
         self.show()
 
+class DiffHighlighter(QSyntaxHighlighter):
+    """Realce de sintaxe básico para Diffs."""
+    def __init__(self, document):
+        super().__init__(document)
+        self.added_fmt = QTextCharFormat()
+        self.added_fmt.setForeground(QColor("#a6e22e")) # Verde
+        
+        self.removed_fmt = QTextCharFormat()
+        self.removed_fmt.setForeground(QColor("#f92672")) # Vermelho
+        
+        self.header_fmt = QTextCharFormat()
+        self.header_fmt.setForeground(QColor("#66d9ef")) # Azul
+
+    def highlightBlock(self, text):
+        if text.startswith('+'): self.setFormat(0, len(text), self.added_fmt)
+        elif text.startswith('-'): self.setFormat(0, len(text), self.removed_fmt)
+        elif text.startswith('@@') or text.startswith('diff'): self.setFormat(0, len(text), self.header_fmt)
+
+class FileListItemWidget(QWidget):
+    """Widget customizado para item de arquivo com stats coloridos."""
+    def __init__(self, icon, text, added, removed, text_color, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(5, 2, 5, 2)
+        layout.setSpacing(5)
+        
+        lbl_icon = QLabel()
+        lbl_icon.setPixmap(icon.pixmap(16, 16))
+        lbl_icon.setFixedSize(16, 16)
+        layout.addWidget(lbl_icon)
+        
+        lbl_name = QLabel(text)
+        lbl_name.setStyleSheet(f"color: {text_color}; background-color: transparent;")
+        layout.addWidget(lbl_name)
+        
+        layout.addStretch()
+        
+        if added > 0:
+            lbl_added = QLabel(f"+{added}")
+            lbl_added.setStyleSheet("color: #a6e22e; font-weight: bold; background-color: transparent;")
+            layout.addWidget(lbl_added)
+            
+        if removed > 0:
+            lbl_removed = QLabel(f"-{removed}")
+            lbl_removed.setStyleSheet("color: #f92672; font-weight: bold; background-color: transparent;")
+            layout.addWidget(lbl_removed)
+            
+        # Garante que o widget seja transparente para ver a seleção do QListWidget
+        self.setStyleSheet("background-color: transparent;")
+
 class DiffViewer(QDialog):
     """Janela para visualizar o diff de um arquivo."""
     def __init__(self, diff_text, title, parent=None):
@@ -44,6 +94,7 @@ class DiffViewer(QDialog):
         text_edit.setReadOnly(True)
         text_edit.setFont(QFont("Monospace", 10))
         text_edit.setStyleSheet("border: none; background-color: #1e1e1e; color: #cccccc;")
+        self.highlighter = DiffHighlighter(text_edit.document())
         layout.addWidget(text_edit)
 
 class CommitDetailsDialog(QDialog):
@@ -136,6 +187,8 @@ class GitGraphWidget(QWidget):
         self.setMouseTracking(True) # Habilita rastreamento do mouse para hover
         self.hovered_commit = None
         self.hover_pos = QPoint(0, 0)
+        self.bg_color = QColor("#1e1e1e")
+        self.text_color = QColor("#cccccc")
         # Cores para os branches
         self.colors = [
             QColor("#40c463"), QColor("#f38ba8"), QColor("#89b4fa"), 
@@ -147,6 +200,11 @@ class GitGraphWidget(QWidget):
     def set_data(self, commits):
         self.commits = commits
         self.setMinimumHeight(len(commits) * self.row_height + 20)
+        self.update()
+
+    def set_theme_colors(self, bg, fg):
+        self.bg_color = QColor(bg)
+        self.text_color = QColor(fg)
         self.update()
 
     def mousePressEvent(self, event):
@@ -306,7 +364,7 @@ class GitGraphWidget(QWidget):
 
             # 3. Desenha o Nó do commit
             painter.setPen(QPen(node_color, 2))
-            painter.setBrush(QBrush(QColor("#252526")))
+            painter.setBrush(QBrush(self.bg_color))
             node_rect = QRect(node_x - self.node_radius, y - self.node_radius, self.node_radius*2, self.node_radius*2)
             painter.drawEllipse(node_rect)
             
@@ -331,7 +389,7 @@ class GitGraphWidget(QWidget):
 
             # Mensagem
             painter.setFont(font_msg)
-            painter.setPen(QColor("#cccccc"))
+            painter.setPen(self.text_color)
             # Elide text se for muito longo
             msg = commit['message']
             fm = QFontMetrics(font_msg)
@@ -349,9 +407,9 @@ class RightSidebar(QWidget):
         super().__init__(parent)
         self.git_logic = GitLogic()
         self.auth_logic = None
+        self.theme = {}
         self.setObjectName("RightSidebar")
         self.setMinimumWidth(200)
-        self.setStyleSheet("background-color: #252526; border-left: 1px solid #3e3e42;")
         
         self._setup_ui()
 
@@ -369,22 +427,19 @@ class RightSidebar(QWidget):
 
         # Título
         lbl_title = QLabel("Git Clone")
-        lbl_title.setStyleSheet("font-weight: bold; color: #cccccc; font-size: 14px;")
+        lbl_title.setStyleSheet("font-weight: bold; font-size: 14px;")
         clone_layout.addWidget(lbl_title)
 
         # Separador
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
-        line.setStyleSheet("background-color: #3e3e42;")
         clone_layout.addWidget(line)
 
         # Input URL
         lbl_url = QLabel("URL do Repositório:")
-        lbl_url.setStyleSheet("color: #cccccc;")
         self.input_url = QLineEdit()
         self.input_url.setPlaceholderText("https://github.com/user/repo.git")
-        self.input_url.setStyleSheet("background-color: #3c3c3c; color: white; border: 1px solid #454545; padding: 5px;")
         
         clone_layout.addWidget(lbl_url)
         clone_layout.addWidget(self.input_url)
@@ -392,10 +447,6 @@ class RightSidebar(QWidget):
         # Botão Clonar
         self.btn_clone = QPushButton("Clonar Repositório")
         self.btn_clone.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_clone.setStyleSheet("""
-            QPushButton { background-color: #007acc; color: white; padding: 8px; border: none; border-radius: 4px; }
-            QPushButton:hover { background-color: #0098ff; }
-        """)
         self.btn_clone.clicked.connect(self._handle_clone_click)
         
         clone_layout.addWidget(self.btn_clone)
@@ -408,12 +459,10 @@ class RightSidebar(QWidget):
         
         # Header Git
         header_frame = QFrame()
-        header_frame.setStyleSheet("background-color: #2d2d30; padding: 5px;")
         header_layout = QHBoxLayout(header_frame)
         header_layout.setContentsMargins(0, 0, 0, 0)
         
         self.branch_selector = QComboBox()
-        self.branch_selector.setStyleSheet("background-color: #3c3c3c; color: white; border: none; padding: 2px;")
         self.branch_selector.currentIndexChanged.connect(self._switch_branch)
 
         btn_new_branch = QPushButton()
@@ -460,10 +509,50 @@ class RightSidebar(QWidget):
         
         git_layout.addWidget(header_frame)
         
+        # --- Seção de Arquivos Modificados (Collapsible) ---
+        self.files_section = QWidget()
+        files_layout = QVBoxLayout(self.files_section)
+        files_layout.setContentsMargins(5, 5, 5, 5)
+        files_layout.setSpacing(5)
+        
+        self.btn_toggle_files = QToolButton()
+        self.btn_toggle_files.setText(" Arquivos Modificados (0)")
+        self.btn_toggle_files.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btn_toggle_files.setArrowType(Qt.DownArrow)
+        self.btn_toggle_files.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.btn_toggle_files.clicked.connect(self._toggle_files)
+        
+        self.file_list = QListWidget()
+        self.file_list.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #333333; 
+                color: #9cdcfe;
+                border-radius: 4px;
+            }
+            QListWidget::item {
+                padding: 4px;
+            }
+            QListWidget::item:selected {
+                background-color: #094771;
+                color: white;
+            }
+            QListWidget::item:hover {
+                background-color: #2a2d2e;
+            }
+        """)
+        self.file_list.setMaximumHeight(250)
+        self.file_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.file_list.customContextMenuRequested.connect(self._show_file_context_menu)
+        self.file_list.itemDoubleClicked.connect(lambda item: self._view_current_diff(item.text()))
+        
+        files_layout.addWidget(self.btn_toggle_files)
+        files_layout.addWidget(self.file_list)
+        
+        git_layout.addWidget(self.files_section)
+        
         # Área do Gráfico (Scrollável)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("background-color: #1e1e1e; border: none;")
         
         self.graph_widget = GitGraphWidget()
         self.graph_widget.copy_hash_requested.connect(self._copy_hash)
@@ -482,6 +571,52 @@ class RightSidebar(QWidget):
 
     def set_auth_logic(self, auth_logic):
         self.auth_logic = auth_logic
+
+    def apply_theme(self, theme):
+        """Aplica o tema visual à barra lateral direita."""
+        self.theme = theme
+        bg = theme.get("sidebar_bg", "#252526")
+        fg = theme.get("foreground", "#cccccc")
+        border = theme.get("border_color", "#3e3e42")
+        accent = theme.get("accent", "#007acc")
+        input_bg = theme.get("background", "#1e1e1e")
+        
+        self.setStyleSheet(f"""
+            QWidget#RightSidebar {{
+                background-color: {bg};
+                border-left: 1px solid {border};
+                color: {fg};
+            }}
+            QLabel {{ color: {fg}; }}
+            QLineEdit {{
+                background-color: {input_bg};
+                color: {fg};
+                border: 1px solid {border};
+                padding: 5px;
+                border-radius: 4px;
+            }}
+            QComboBox {{
+                background-color: {input_bg};
+                color: {fg};
+                border: 1px solid {border};
+                padding: 2px;
+            }}
+            QToolButton {{
+                border: none;
+                background-color: {bg};
+                color: {fg};
+                padding: 6px;
+                text-align: left;
+                font-weight: bold;
+            }}
+            QToolButton:hover {{
+                background-color: {border};
+            }}
+        """)
+        
+        self.btn_clone.setStyleSheet(f"background-color: {accent}; color: white; padding: 8px; border: none; border-radius: 4px;")
+        self.graph_widget.set_theme_colors(bg, fg)
+        self._refresh_files() # Re-renderiza a lista para aplicar cores
 
     def load_repo(self, path):
         """Chamado quando um projeto é aberto."""
@@ -507,6 +642,7 @@ class RightSidebar(QWidget):
 
         commits = self.git_logic.get_graph_data(self.current_repo)
         self.graph_widget.set_data(commits)
+        self._refresh_files()
 
     def _perform_commit(self):
         if not self.current_repo: return
@@ -622,3 +758,82 @@ class RightSidebar(QWidget):
 
     def _open_commit_details(self, commit_data):
         CommitDetailsDialog(self.current_repo, commit_data, self.git_logic, self).exec()
+
+    def _toggle_files(self):
+        """Expande ou recolhe a lista de arquivos."""
+        visible = self.file_list.isVisible()
+        self.file_list.setVisible(not visible)
+        self.btn_toggle_files.setArrowType(Qt.RightArrow if visible else Qt.DownArrow)
+
+    def _refresh_files(self):
+        """Atualiza a lista de arquivos modificados."""
+        if not self.current_repo: return
+        files = self.git_logic.get_changed_files(self.current_repo)
+        stats = self.git_logic.get_files_stats(self.current_repo)
+        self.file_list.clear()
+        
+        icon = self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
+        text_color = self.theme.get("foreground", "#cccccc")
+        for f in files:
+            added, removed = 0, 0
+            if f in stats:
+                added, removed = stats[f]
+            
+            item = QListWidgetItem(self.file_list)
+            item.setData(Qt.UserRole, f) # Armazena o nome real do arquivo
+            
+            widget = FileListItemWidget(icon, f, added, removed, text_color)
+            item.setSizeHint(widget.sizeHint())
+            self.file_list.setItemWidget(item, widget)
+            
+        self.btn_toggle_files.setText(f" Arquivos Modificados ({len(files)})")
+
+    def _show_file_context_menu(self, pos):
+        item = self.file_list.itemAt(pos)
+        if not item: return
+        file_path = item.data(Qt.UserRole) # Recupera o caminho limpo
+        
+        menu = QMenu(self)
+        menu.setStyleSheet("QMenu { background-color: #252526; color: #cccccc; } QMenu::item:selected { background-color: #007acc; }")
+        
+        menu.addAction("Ver Diff (vs HEAD)", lambda: self._view_current_diff(file_path))
+        menu.addAction("Adicionar ao Stage (+)", lambda: self._stage_file(file_path))
+        menu.addAction("Remover do Stage (-)", lambda: self._unstage_file(file_path))
+        menu.addSeparator()
+        menu.addAction("Descartar Alterações", lambda: self._discard_file_changes(file_path))
+        
+        menu.exec(self.file_list.mapToGlobal(pos))
+
+    def _view_current_diff(self, file_path):
+        if not self.current_repo: return
+        diff = self.git_logic.get_working_diff(self.current_repo, file_path)
+        if diff.strip():
+            DiffViewer(diff, f"{file_path} (Working Tree)", self).exec()
+        else:
+            QMessageBox.information(self, "Diff", "O arquivo parece não ter diferenças textuais ou é um arquivo binário/novo.")
+
+    def _discard_file_changes(self, file_path):
+        if not self.current_repo: return
+        reply = QMessageBox.question(self, "Descartar Alterações", f"Tem certeza que deseja descartar as alterações em '{file_path}'?\nEssa ação é irreversível.", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            success, msg = self.git_logic.discard_changes(self.current_repo, file_path)
+            if success:
+                self._refresh_files()
+            else:
+                QMessageBox.warning(self, "Erro", msg)
+
+    def _stage_file(self, file_path):
+        if not self.current_repo: return
+        success, msg = self.git_logic.stage_file(self.current_repo, file_path)
+        if success:
+            self._refresh_files()
+        else:
+            QMessageBox.warning(self, "Erro", msg)
+
+    def _unstage_file(self, file_path):
+        if not self.current_repo: return
+        success, msg = self.git_logic.unstage_file(self.current_repo, file_path)
+        if success:
+            self._refresh_files()
+        else:
+            QMessageBox.warning(self, "Erro", msg)

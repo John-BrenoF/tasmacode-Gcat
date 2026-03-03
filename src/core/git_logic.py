@@ -179,3 +179,75 @@ class GitLogic:
             return res.stdout
         except:
             return "Não foi possível obter o diff."
+
+    def get_changed_files(self, repo_path: str) -> list[str]:
+        """Retorna lista de arquivos alterados (staged e unstaged)."""
+        try:
+            # --porcelain imprime status de forma parseável e estável
+            res = subprocess.run(["git", "status", "--porcelain"], cwd=repo_path, capture_output=True, text=True)
+            files = []
+            for line in res.stdout.splitlines():
+                if len(line) > 3:
+                    files.append(line[3:]) # Remove o status (ex: "M  ", "?? ") e pega o caminho
+            return files
+        except:
+            return []
+
+    def get_working_diff(self, repo_path: str, file_path: str) -> str:
+        """Retorna o diff do arquivo no diretório de trabalho contra o HEAD."""
+        try:
+            res = subprocess.run(["git", "diff", "HEAD", "--", file_path], cwd=repo_path, capture_output=True, text=True)
+            return res.stdout
+        except:
+            return "Não foi possível obter o diff."
+
+    def discard_changes(self, repo_path: str, file_path: str) -> tuple[bool, str]:
+        """Descarta alterações no arquivo (reverte para HEAD ou exclui se for novo)."""
+        try:
+            # Verifica se é arquivo novo (untracked)
+            status_res = subprocess.run(["git", "status", "--porcelain", file_path], cwd=repo_path, capture_output=True, text=True)
+            if status_res.stdout.startswith("??"):
+                os.remove(os.path.join(repo_path, file_path))
+                return True, "Arquivo novo excluído."
+            
+            # Para arquivos modificados/deletados
+            subprocess.run(["git", "checkout", "HEAD", "--", file_path], cwd=repo_path, check=True, capture_output=True)
+            return True, "Alterações descartadas."
+        except Exception as e:
+            return False, f"Erro ao descartar: {str(e)}"
+
+    def stage_file(self, repo_path: str, file_path: str) -> tuple[bool, str]:
+        """Adiciona um arquivo específico ao stage (git add)."""
+        try:
+            subprocess.run(["git", "add", file_path], cwd=repo_path, check=True, capture_output=True)
+            return True, "Arquivo adicionado ao stage."
+        except subprocess.CalledProcessError as e:
+            return False, f"Erro ao adicionar ao stage: {e.stderr.decode() if e.stderr else str(e)}"
+
+    def get_files_stats(self, repo_path: str) -> dict:
+        """Retorna estatísticas de linhas (+/-) para arquivos modificados (unstaged)."""
+        stats = {}
+        try:
+            # --numstat retorna: added removed filename
+            res = subprocess.run(["git", "diff", "--numstat"], cwd=repo_path, capture_output=True, text=True)
+            for line in res.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 3:
+                    try:
+                        added = int(parts[0])
+                        removed = int(parts[1])
+                        filename = " ".join(parts[2:])
+                        stats[filename] = (added, removed)
+                    except ValueError:
+                        pass # Ignora arquivos binários ou erros de parse
+            return stats
+        except:
+            return {}
+
+    def unstage_file(self, repo_path: str, file_path: str) -> tuple[bool, str]:
+        """Remove um arquivo do stage (git reset HEAD)."""
+        try:
+            subprocess.run(["git", "reset", "HEAD", "--", file_path], cwd=repo_path, check=True, capture_output=True)
+            return True, "Arquivo removido do stage."
+        except subprocess.CalledProcessError as e:
+            return False, f"Erro ao remover do stage: {e.stderr.decode() if e.stderr else str(e)}"
