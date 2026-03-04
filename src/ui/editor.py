@@ -499,6 +499,12 @@ class CodeEditor(QAbstractScrollArea):
         scroll_y = self.verticalScrollBar().value()
         viewport_h = self.viewport().height()
         
+        active_lines = {c.line for c in self.buffer.cursors}
+        normal_color = QColor(self.theme.get_color("gutter_fg"))
+        active_color = QColor(self.theme.get_color("foreground"))
+        bold_font = QFont(self.font)
+        bold_font.setBold(True)
+
         if self.word_wrap_enabled and self._visual_lines:
             first_visual_line = scroll_y // self.line_height if self.line_height > 0 else 0
             visual_lines_visible = (viewport_h // self.line_height if self.line_height > 0 else 0) + 2
@@ -511,12 +517,16 @@ class CodeEditor(QAbstractScrollArea):
                 
                 if start_col == 0:
                     y = (visual_line_idx * self.line_height) - scroll_y
-                    painter.setPen(QColor(self.theme.get_color("gutter_fg")))
-                    painter.setFont(self.font)
+                    if logical_line_idx in active_lines:
+                        painter.setPen(active_color)
+                        painter.setFont(bold_font)
+                    else:
+                        painter.setPen(normal_color)
+                        painter.setFont(self.font)
                     painter.drawText(0, int(y), self.line_number_area.width() - 5, self.line_height, Qt.AlignmentFlag.AlignRight, str(logical_line_idx + 1))
                 else:
                     y = (visual_line_idx * self.line_height) - scroll_y
-                    painter.setPen(QColor(self.theme.get_color("gutter_fg")))
+                    painter.setPen(normal_color)
                     painter.setFont(self.font)
                     painter.drawText(0, int(y), self.line_number_area.width() - 5, self.line_height, Qt.AlignmentFlag.AlignRight, "⤶")
         else:
@@ -526,8 +536,13 @@ class CodeEditor(QAbstractScrollArea):
                 line_idx = first_line + i
                 if line_idx >= self.buffer.line_count: break
                 y = (line_idx * self.line_height) - scroll_y
-                painter.setPen(QColor(self.theme.get_color("gutter_fg")))
-                painter.setFont(self.font)
+                
+                if line_idx in active_lines:
+                    painter.setPen(active_color)
+                    painter.setFont(bold_font)
+                else:
+                    painter.setPen(normal_color)
+                    painter.setFont(self.font)
                 painter.drawText(0, int(y), self.line_number_area.width() - 5, self.line_height, Qt.AlignmentFlag.AlignRight, str(line_idx + 1))
 
     def paintEvent(self, event):
