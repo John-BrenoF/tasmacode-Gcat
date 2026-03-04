@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, QLineEdit,
                                QTreeView, QFileSystemModel, QHBoxLayout, 
-                               QStackedWidget, QFrame, QStyle, QMenu, QMessageBox, QInputDialog)
+                               QStackedWidget, QFrame, QStyle, QMenu, QMessageBox, QInputDialog, QListWidget, QListWidgetItem)
 from PySide6.QtCore import Qt, Signal, QDir, QEvent, QSortFilterProxyModel, QRegularExpression
 from PySide6.QtGui import QIcon
 import os
@@ -33,6 +33,7 @@ class Sidebar(QWidget):
     file_clicked = Signal(str) # Envia o caminho do arquivo
     file_created = Signal(str) # Novo arquivo criado
     status_message = Signal(str, int) # Mensagem para statusbar (msg, timeout)
+    marker_clicked = Signal(str, int) # Envia caminho do arquivo e número da linha
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -53,14 +54,18 @@ class Sidebar(QWidget):
         self.btn_new_folder = self._create_action_btn(QStyle.StandardPixmap.SP_DirIcon, "Nova Pasta")
         self.btn_refresh = self._create_action_btn(QStyle.StandardPixmap.SP_BrowserReload, "Recarregar")
         self.btn_open_project = self._create_action_btn(QStyle.StandardPixmap.SP_FileDialogNewFolder, "Abrir Projeto")
+        self.btn_toggle_view = self._create_action_btn(QStyle.StandardPixmap.SP_FileDialogDetailedView, "Alternar Marcadores")
         
         self.btn_new_file.clicked.connect(lambda: self._start_creation(is_folder=False))
         self.btn_new_folder.clicked.connect(lambda: self._start_creation(is_folder=True))
         self.btn_refresh.clicked.connect(self._refresh_tree)
         self.btn_open_project.clicked.connect(self.open_project_clicked.emit)
+        self.btn_toggle_view.clicked.connect(self._toggle_view_mode)
 
-        tb_layout.addWidget(QLabel("EXPLORER"))
+        self.lbl_title = QLabel("EXPLORER")
+        tb_layout.addWidget(self.lbl_title)
         tb_layout.addStretch()
+        tb_layout.addWidget(self.btn_toggle_view)
         tb_layout.addWidget(self.btn_open_project)
         tb_layout.addWidget(self.btn_new_file)
         tb_layout.addWidget(self.btn_new_folder)
@@ -130,6 +135,14 @@ class Sidebar(QWidget):
         
         self.stack.addWidget(self.tree)
         
+        # Estado 3: Lista de Marcadores
+        self.markers_list = QListWidget()
+        self.markers_list.setStyleSheet("background-color: #252526; color: #cccccc; border: none;")
+        self.markers_list.itemClicked.connect(self._on_marker_item_clicked)
+        self.markers_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.markers_list.customContextMenuRequested.connect(self._show_marker_context_menu)
+        self.stack.addWidget(self.markers_list)
+        
         # --- Inline Input para Criação ---
         self.input_edit = QLineEdit(self.tree)
         self.input_edit.hide()
@@ -151,6 +164,66 @@ class Sidebar(QWidget):
         btn.setObjectName("SidebarAction")
         btn.setFixedSize(24, 24)
         return btn
+
+    def _toggle_view_mode(self):
+        """Alterna entre a árvore de arquivos e a lista de marcadores."""
+        if self.stack.currentWidget() == self.markers_list:
+            self.stack.setCurrentWidget(self.tree)
+            self.lbl_title.setText("EXPLORER")
+            self.search_input.setPlaceholderText("Filtrar arquivos (Ctrl+Shift+F)")
+            self.search_input.show()
+        else:
+            self.stack.setCurrentWidget(self.markers_list)
+            self.lbl_title.setText("MARCADORES")
+            self.search_input.setPlaceholderText("Filtrar marcadores...")
+            self.search_input.show()
+            self.search_input.clear()
+
+    def update_markers(self, global_markers):
+        """Atualiza a lista de marcadores globais.
+        Args:
+            global_markers: lista de tuplas (file_path, line, marker)
+        """
+        self.markers_list.clear()
+        if not global_markers:
+            return
+            
+        # Ordena por caminho do arquivo e depois por linha
+        sorted_markers = sorted(global_markers, key=lambda x: (x[0], x[1]))
+        
+        for file_path, line, marker in sorted_markers:
+            file_name = os.path.basename(file_path)
+            label = f"{file_name} : {line + 1}"
+            if marker.label:
+                label += f" - {marker.label}"
+            
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, (file_path, line))
+            item.setToolTip(file_path)
+            self.markers_list.addItem(item)
+            
+        if self.search_input.text():
+            self._filter_markers(self.search_input.text())
+
+    def _on_marker_item_clicked(self, item):
+        data = item.data(Qt.UserRole)
+        if data:
+            file_path, line = data
+            self.marker_clicked.emit(file_path, line)
+
+    def _show_marker_context_menu(self, pos):
+        item = self.markers_list.itemAt(pos)
+        if not item: return
+        
+        file_path, line = item.data(Qt.UserRole)
+        
+        menu = QMenu(self)
+        menu.setStyleSheet("QMenu { background-color: #252526; color: #cccccc; border: 1px solid #454545; } QMenu::item:selected { background-color: #007acc; }")
+        
+        action_go = menu.addAction("Ir para Linha")
+        action_go.triggered.connect(lambda: self.marker_clicked.emit(file_path, line))
+        
+        menu.exec(self.markers_list.mapToGlobal(pos))
 
     def set_root_path(self, path: str):
         """Define a pasta raiz da árvore."""
@@ -186,7 +259,17 @@ class Sidebar(QWidget):
             return os.path.dirname(path)
 
     def _on_filter_text_changed(self, text: str):
-        self.filter_proxy_model.setFilterWildcard(f"*{text}*")
+        if self.stack.currentWidget() == self.tree:
+            self.filter_proxy_model.setFilterWildcard(f"*{text}*")
+        elif self.stack.currentWidget() == self.markers_list:
+            self._filter_markers(text)
+
+    def _filter_markers(self, text: str):
+        text = text.lower()
+        for i in range(self.markers_list.count()):
+            item = self.markers_list.item(i)
+            # Filtra pelo texto do item (que contém linha e tag)
+            item.setHidden(text not in item.text().lower())
 
     def _start_creation(self, is_folder: bool):
         """Inicia o processo de criação mostrando o input."""

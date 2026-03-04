@@ -1,6 +1,6 @@
-from PySide6.QtWidgets import QAbstractScrollArea, QMenu, QInputDialog, QColorDialog
+from PySide6.QtWidgets import QAbstractScrollArea, QMenu, QInputDialog, QColorDialog, QToolTip
 from PySide6.QtCore import Signal, Qt, QTimer, QRect, QPoint, QEvent
-from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QFontInfo
+from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QFontInfo, QCursor
 from plugins.line_number_area import LineNumberArea
 from .autocomplete_widget import AutocompleteWidget, ParameterHintWidget
 from src.core.editor_logic.marker_manager import MarkerManager
@@ -13,6 +13,7 @@ class CodeEditor(QAbstractScrollArea):
     
     text_changed = Signal()
     cursor_moved = Signal()
+    markers_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -32,6 +33,7 @@ class CodeEditor(QAbstractScrollArea):
         self.auto_indent = True
         self.autocomplete_enabled = False
         self.marker_manager = MarkerManager()
+        self.cache_dir = None
         
         # Configuração de Fonte e Métricas
         # Tenta usar fontes modernas, fallback para Monospace genérico
@@ -79,6 +81,9 @@ class CodeEditor(QAbstractScrollArea):
         self.horizontalScrollBar().valueChanged.connect(self.line_number_area.update)
         self._update_line_number_area_width()
         
+        # Conecta sinal de mudança de marcadores para salvar no cache
+        self.markers_changed.connect(self._save_markers)
+        
     def set_buffer(self, buffer):
         self.buffer = buffer
         self.buffer.dirty = False  # Initialize the dirty flag
@@ -104,9 +109,20 @@ class CodeEditor(QAbstractScrollArea):
     def set_input_mapper(self, mapper):
         self.input_mapper = mapper
 
+    def set_cache_dir(self, path: str):
+        self.cache_dir = path
+
     def set_file_path(self, path: str):
         """Sets the file path and emits the file_path_changed signal."""
         self.setProperty("file_path", path)
+        self.marker_manager.set_file_path(path)
+        if self.cache_dir:
+            self.marker_manager.load_from_cache(self.cache_dir)
+            self.markers_changed.emit()
+
+    def _save_markers(self):
+        if self.cache_dir:
+            self.marker_manager.save_to_cache(self.cache_dir)
 
     def keyPressEvent(self, event):
         """Delega eventos de teclado para o InputMapper."""
@@ -125,9 +141,23 @@ class CodeEditor(QAbstractScrollArea):
 
     def eventFilter(self, obj, event):
         """Filtra eventos para detectar clique direito na área de números."""
-        if hasattr(self, 'line_number_area') and obj == self.line_number_area and event.type() == QEvent.Type.ContextMenu:
-            self._show_gutter_context_menu(event.globalPos())
-            return True
+        if hasattr(self, 'line_number_area') and obj == self.line_number_area:
+            if event.type() == QEvent.Type.ContextMenu:
+                self._show_gutter_context_menu(event.globalPos())
+                return True
+            elif event.type() == QEvent.Type.ToolTip:
+                # Lógica para Tooltip de Marcadores
+                pos = event.pos()
+                y = pos.y()
+                scroll_y = self.verticalScrollBar().value()
+                # Cálculo simplificado de linha (assumindo altura fixa por enquanto para tooltip)
+                line_number = (y + scroll_y) // self.line_height
+                
+                if self.marker_manager.has_marker(line_number):
+                    marker = self.marker_manager.get_marker(line_number)
+                    if marker.label:
+                        QToolTip.showText(event.globalPos(), f"Tag: {marker.label}")
+                        return True
         return super().eventFilter(obj, event)
 
     def _show_gutter_context_menu(self, global_pos):
@@ -173,6 +203,7 @@ class CodeEditor(QAbstractScrollArea):
     def _toggle_marker(self, line):
         self.marker_manager.toggle_marker(line)
         self.line_number_area.update()
+        self.markers_changed.emit()
 
     def _edit_marker_tag(self, line):
         marker = self.marker_manager.get_marker(line)
@@ -181,6 +212,7 @@ class CodeEditor(QAbstractScrollArea):
         if ok:
             marker.label = text
             self.line_number_area.update()
+            self.markers_changed.emit()
             
     def _edit_marker_color(self, line):
         marker = self.marker_manager.get_marker(line)
@@ -189,6 +221,7 @@ class CodeEditor(QAbstractScrollArea):
         if color.isValid():
             marker.color = color.name()
             self.line_number_area.update()
+            self.markers_changed.emit()
 
     def mousePressEvent(self, event):
         """Trata o clique do mouse para posicionar o cursor."""

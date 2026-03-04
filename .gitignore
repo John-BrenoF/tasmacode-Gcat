@@ -1,0 +1,15 @@
+# Ambientes Virtuais
+.venv/
+
+# Cache e Logs
+cache/
+logs/
+
+# Python Bytecode (Geral)
+__pycache__/
+*.pyc
+
+# Caminhos específicos solicitados (cobertos pela regra geral acima, mas listados explicitamente)
+src/ui/__pycache__/
+src/core/editor_logic/__pycache__/
+src/core/__pycache__/

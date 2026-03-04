@@ -47,6 +47,7 @@ from src.core.github_auth import GithubAuth
 from src.ui.profile_window import ProfileWindow
 from src.ui.custom_title_bar import CustomTitleBar
 from src.core.ui_logic.font_manager import FontManager
+from src.core.editor_logic.marker_manager import MarkerManager
 
 class JCodeMainWindow(QMainWindow):
     """Janela principal do editor JCODE.
@@ -83,6 +84,7 @@ class JCodeMainWindow(QMainWindow):
         self.live_server_manager = LiveServerManager()
         self.event_handler = EventHandler(self.extension_bridge, None) # Buffer será definido dinamicamente
         self.viewport_controller = ViewportController()
+        self.cache_dir = os.path.join(root_dir, "cache")
         
         # --- 3. Configuração da UI ---
         self.setWindowTitle("JCode - Modular Editor")
@@ -548,6 +550,7 @@ class JCodeMainWindow(QMainWindow):
         self.sidebar.file_clicked.connect(self._open_file)
         self.sidebar.file_created.connect(self._open_file)
         self.sidebar.status_message.connect(self.custom_statusbar.showMessage)
+        self.sidebar.marker_clicked.connect(self._on_sidebar_marker_clicked)
 
         # Conexão do EditorGroup
         self.editor_group.active_editor_changed.connect(self._on_active_editor_changed)
@@ -567,18 +570,50 @@ class JCodeMainWindow(QMainWindow):
 
     def _on_active_editor_changed(self, editor_widget):
         """Chamado quando a aba ativa muda."""
+        # Desconecta sinais do editor anterior se necessário (opcional, mas boa prática)
+        if self.active_editor and isinstance(self.active_editor, CodeEditor):
+            try:
+                self.active_editor.markers_changed.disconnect(self._update_sidebar_markers)
+            except:
+                pass
+
         self.active_editor = editor_widget
         if editor_widget:
             self.event_handler.buffer = editor_widget.buffer
             self.viewport_controller.attach_to(editor_widget)
+            
+            # Conecta sinais do novo editor
+            if isinstance(editor_widget, CodeEditor):
+                editor_widget.markers_changed.connect(self._update_sidebar_markers)
+                self._update_sidebar_markers() # Atualiza inicial
         else:
             self.event_handler.buffer = None
-
+            self.sidebar.update_markers([]) # Limpa marcadores
+            
         self._on_buffer_modified()
         # Limpa os highlights de busca ao trocar de aba
         self._hide_search_panel()
         if self.active_editor and hasattr(self.active_editor, 'autocomplete_widget'):
             self.active_editor.autocomplete_widget.hide()
+
+    def _update_sidebar_markers(self):
+        """Atualiza a sidebar com os marcadores globais do projeto."""
+        # Garante que os marcadores atuais foram salvos no cache antes de ler
+        if self.active_editor and isinstance(self.active_editor, CodeEditor):
+             self.active_editor._save_markers()
+             
+        markers = MarkerManager.get_global_markers(self.cache_dir)
+        self.sidebar.update_markers(markers)
+
+    def _on_sidebar_marker_clicked(self, file_path, line):
+        """Navega para a linha do marcador clicado na sidebar."""
+        self._open_file(file_path)
+        
+        if self.active_editor and isinstance(self.active_editor, CodeEditor):
+            if self.active_editor.property("file_path") == file_path:
+                self.active_editor.buffer.update_last_cursor(line, 0)
+                self.active_editor._ensure_cursor_visible()
+                self.active_editor.viewport().update()
 
     def _check_autocomplete_trigger(self):
         """Verifica se o autocomplete deve ser acionado."""
@@ -998,7 +1033,7 @@ class JCodeMainWindow(QMainWindow):
 
         path, _ = QFileDialog.getSaveFileName(self, "Salvar Como...")
         if path:
-            self.active_editor.setProperty("file_path", path)
+            self.active_editor.set_file_path(path)
             self._save_file()
 
     def _open_file(self, path):
@@ -1032,7 +1067,8 @@ class JCodeMainWindow(QMainWindow):
             buffer.dirty = False
 
             editor = CodeEditor()
-            editor.setProperty("file_path", path)
+            editor.set_cache_dir(self.cache_dir)
+            editor.set_file_path(path)
             editor.set_dependencies(buffer, self.theme_manager, self.highlighter, self.autocomplete_manager)
             editor.set_input_mapper(self.input_mapper)
             # Aplica configurações atuais ao novo editor
