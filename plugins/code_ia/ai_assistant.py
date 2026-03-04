@@ -4,12 +4,13 @@ import json
 import requests
 import re
 import uuid
+import difflib
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QLineEdit, QPushButton, 
                                QHBoxLayout, QSplitter, QInputDialog, QToolButton, QLabel, 
                                QDialog, QFormLayout, QComboBox, QDialogButtonBox, QMessageBox,
                                QTextBrowser, QListWidget, QListWidgetItem, QFileDialog, QStyle, QTreeView, QFileSystemModel, QMenu)
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QUrl, QDir, QSortFilterProxyModel
-from PySide6.QtGui import QFont, QTextCursor, QDesktopServices, QColor
+from PySide6.QtGui import QFont, QTextCursor, QDesktopServices, QColor, QCursor, QSyntaxHighlighter, QTextCharFormat
 
 class AIWorker(QThread):
     chunk_received = Signal(str)
@@ -230,36 +231,68 @@ class ProjectFilesDialog(QDialog):
         files = {self.source_model.filePath(index) for index in source_indexes if index.column() == 0 and not self.source_model.isDir(index)}
         return list(files)
 
-class CodeConfirmDialog(QDialog):
-    """Diálogo minimalista para confirmar aplicação de código."""
-    def __init__(self, message="Aplicar este código no editor?", parent=None):
-        super().__init__(parent, Qt.WindowType.FramelessWindowHint | Qt.WindowType.Popup)
-        self.setStyleSheet("""
-            QDialog { background-color: #252526; border: 1px solid #007acc; border-radius: 4px; }
-            QLabel { color: #cccccc; font-weight: bold; margin: 5px; }
-            QPushButton { border: none; border-radius: 3px; padding: 4px 10px; font-weight: bold; }
-            QPushButton#Accept { background-color: #2ea043; color: white; }
-            QPushButton#Accept:hover { background-color: #3fb950; }
-            QPushButton#Deny { background-color: #d73a49; color: white; }
-            QPushButton#Deny:hover { background-color: #cb2431; }
-        """)
+class DiffHighlighter(QSyntaxHighlighter):
+    def __init__(self, document):
+        super().__init__(document)
+        self.added_fmt = QTextCharFormat()
+        self.added_fmt.setForeground(QColor("#a6e22e"))
+        self.added_fmt.setBackground(QColor("#2d422f"))
+
+        self.removed_fmt = QTextCharFormat()
+        self.removed_fmt.setForeground(QColor("#f92672"))
+        self.removed_fmt.setBackground(QColor("#4d2d33"))
+
+        self.header_fmt = QTextCharFormat()
+        self.header_fmt.setForeground(QColor("#808080"))
+
+    def highlightBlock(self, text):
+        if text.startswith('+'):
+            self.setFormat(0, len(text), self.added_fmt)
+        elif text.startswith('-'):
+            self.setFormat(0, len(text), self.removed_fmt)
+        elif text.startswith('@@') or text.startswith('---') or text.startswith('+++'):
+            self.setFormat(0, len(text), self.header_fmt)
+
+class CodeDiffDialog(QDialog):
+    def __init__(self, old_code, new_code, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Confirmar Alteração de Código")
+        self.resize(800, 600)
+        self.setStyleSheet("background-color: #1e1e1e; color: #cccccc;")
+        
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
         
-        layout.addWidget(QLabel(message))
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setFont(QFont("Monospace", 10))
+        text_edit.setStyleSheet("border: none; background-color: #1e1e1e; color: #cccccc;")
         
-        btn_layout = QHBoxLayout()
-        btn_accept = QPushButton("Aceitar")
-        btn_accept.setObjectName("Accept")
-        btn_accept.clicked.connect(self.accept)
+        diff_lines = difflib.unified_diff(
+            old_code.splitlines(),
+            new_code.splitlines(),
+            fromfile='Original',
+            tofile='Sugestão',
+            lineterm='',
+        )
         
-        btn_deny = QPushButton("Negar")
-        btn_deny.setObjectName("Deny")
-        btn_deny.clicked.connect(self.reject)
+        diff_text = "\n".join(diff_lines)
         
-        btn_layout.addWidget(btn_accept)
-        btn_layout.addWidget(btn_deny)
-        layout.addLayout(btn_layout)
+        if not diff_text and new_code:
+            diff_text = "\n".join(f"+{line}" for line in new_code.splitlines())
+        elif not diff_text and old_code and not new_code:
+             diff_text = "\n".join(f"-{line}" for line in old_code.splitlines())
+
+        text_edit.setPlainText(diff_text)
+        
+        self.highlighter = DiffHighlighter(text_edit.document())
+        layout.addWidget(text_edit)
+        
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.button(QDialogButtonBox.Ok).setText("Aceitar")
+        btns.button(QDialogButtonBox.Cancel).setText("Rejeitar")
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
 
 class ChatHistoryManager:
     """Gerencia o armazenamento local dos chats."""
@@ -647,6 +680,14 @@ class AIChatWidget(QWidget):
         # Carrega arquivos de sistema
         system_msg = self._load_system_files()
         
+        # Instruções de Capacidades
+        system_msg += "\n\n[SYSTEM: Capabilities]\n"
+        system_msg += "Para criar/editar arquivos, use:\n"
+        system_msg += "# file: path/to/file.ext\n"
+        system_msg += "conteudo...\n\n"
+        system_msg += "Para editar/apagar trechos específicos (Search & Replace):\n"
+        system_msg += "<<<<<<< SEARCH\ntexto exato a buscar\n=======\nnovo texto (ou vazio para apagar)\n>>>>>>> REPLACE\n"
+        
         # Combina prompt com anexos
         full_prompt = message + attachments_content
 
@@ -750,53 +791,149 @@ class AIChatWidget(QWidget):
     def highlight_code(self, code, lang):
         """Aplica cores básicas a palavras-chave."""
         code = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        
-        if lang in ["python", "py", "js", "javascript", "html", "css"]:
-            # Comentários (Simples)
+
+        if lang in ["python", "py"]:
             code = re.sub(r'(#.*)', r"<span style='color: #6a9955;'>\1</span>", code)
-            code = re.sub(r'(//.*)', r"<span style='color: #6a9955;'>\1</span>", code)
-            
-            keywords = ["def", "class", "import", "from", "return", "if", "else", "elif", "for", "while", "try", "except", "function", "var", "let", "const", "async", "await"]
+            code = re.sub(r'\b(def)\s+([a-zA-Z_][a-zA-Z0-9_]*)', r"<span style='color: #c586c0;'>\1</span> <span style='color: #dcdcaa;'>\2</span>", code)
+            code = re.sub(r'\b(class)\s+([A-Z][a-zA-Z0-9_]*)', r"<span style='color: #c586c0;'>\1</span> <span style='color: #4ec9b0;'>\2</span>", code)
+            code = re.sub(r'(@[a-zA-Z0-9_.]+)', r"<span style='color: #d7ba7d;'>\1</span>", code)
+            keywords = ["import", "from", "return", "if", "else", "elif", "for", "while", "try", "except", "finally", "with", "as", "lambda", "pass", "break", "continue", "in", "is", "not", "and", "or", "yield", "async", "await"]
             for kw in keywords:
-                code = re.sub(r'\b(' + kw + r')\b', r"<span style='color: #569cd6;'>\1</span>", code)
-            
-            # Números
-            code = re.sub(r'\b(\d+)\b', r"<span style='color: #b5cea8;'>\1</span>", code)
-            
-            # Tipos/Classes (Iniciados com Maiúscula)
-            code = re.sub(r'\b([A-Z][a-zA-Z0-9_]*)\b', r"<span style='color: #4ec9b0;'>\1</span>", code)
-            
-            # Strings
+                code = re.sub(r'\b(' + kw + r')\b', r"<span style='color: #c586c0;'>\1</span>", code)
+            builtins = ["True", "False", "None", "self", "super", "print", "len", "range", "str", "int", "list", "dict", "set", "open"]
+            for bi in builtins:
+                code = re.sub(r'\b(' + bi + r')\b', r"<span style='color: #569cd6;'>\1</span>", code)
             code = re.sub(r'(".*?")', r"<span style='color: #ce9178;'>\1</span>", code)
             code = re.sub(r"('.*?')", r"<span style='color: #ce9178;'>\1</span>", code)
-            
+            code = re.sub(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()', r"<span style='color: #dcdcaa;'>\1</span>", code)
+            code = re.sub(r'\b(\d+\.?\d*)\b', r"<span style='color: #b5cea8;'>\1</span>", code)
+        elif lang in ["js", "javascript", "css", "html"]:
+            code = re.sub(r'(//.*|/\*.*?\*/)', r"<span style='color: #6a9955;'>\1</span>", code)
+            keywords = ["function", "const", "let", "var", "return", "if", "else", "for", "while", "class", "import", "export", "default", "async", "await", "new", "this", "switch", "case", "break", "continue"]
+            for kw in keywords:
+                code = re.sub(r'\b(' + kw + r')\b', r"<span style='color: #c586c0;'>\1</span>", code)
+            builtins = ["true", "false", "null", "undefined", "console", "document", "window", "Math", "JSON", "Promise", "fetch"]
+            for bi in builtins:
+                code = re.sub(r'\b(' + bi + r')\b', r"<span style='color: #569cd6;'>\1</span>", code)
+            code = re.sub(r'\b([A-Z][a-zA-Z0-9_]*)\b', r"<span style='color: #4ec9b0;'>\1</span>", code)
+            code = re.sub(r'(".*?")', r"<span style='color: #ce9178;'>\1</span>", code)
+            code = re.sub(r"('.*?')", r"<span style='color: #ce9178;'>\1</span>", code)
+            code = re.sub(r"(`.*?`)", r"<span style='color: #ce9178;'>\1</span>", code)
+            code = re.sub(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()', r"<span style='color: #dcdcaa;'>\1</span>", code)
+            code = re.sub(r'\b(\d+\.?\d*)\b', r"<span style='color: #b5cea8;'>\1</span>", code)
+
         return code
 
     def _on_link_clicked(self, url: QUrl):
         scheme = url.scheme()
         if scheme == 'apply':
             snippet_id = url.path()
-            code = self.code_snippets.get(snippet_id)
-            if code:
-                # Verifica se há seleção no editor para alterar a mensagem
-                msg = "Aplicar este código no editor?"
-                try:
-                    editor = self.api.get_active_editor()
-                    if editor and editor.buffer:
-                        if any(editor.buffer.has_selection(i) for i in range(len(editor.buffer.cursors))):
-                            msg = "Substituir seleção pelo código?"
-                except:
-                    pass
-
-                # Diálogo Minimalista de Confirmação
-                dlg = CodeConfirmDialog(msg, self)
-                # Posiciona perto do mouse
-                dlg.move(QCursor.pos())
-                if dlg.exec():
-                    self.api.insert_text(code)
-                    self.api.log("Código inserido.")
+            new_code = self.code_snippets.get(snippet_id)
+            if new_code:
+                self._process_apply_code(new_code)
         else:
             QDesktopServices.openUrl(url)
+            
+    def _process_apply_code(self, code):
+        # 1. Detecta cabeçalho de arquivo: # file: path/to/file.ext
+        file_path = None
+        clean_code = code
+        
+        header_match = re.match(r'^[\s#/\*!-]*file:\s*([^\n]+)', code, re.IGNORECASE)
+        if header_match:
+            raw_path = header_match.group(1).strip().strip("'\"")
+            root = self.api.get_project_root()
+            if root:
+                file_path = os.path.join(root, raw_path)
+            else:
+                file_path = raw_path
+            clean_code = code[header_match.end():].lstrip()
+
+        # 2. Verifica padrão Search/Replace
+        if "<<<<<<< SEARCH" in clean_code and ">>>>>>> REPLACE" in clean_code:
+            self._apply_patch(file_path, clean_code)
+        elif file_path:
+            self._apply_file_creation(file_path, clean_code)
+        else:
+            self._apply_to_active_editor(clean_code)
+
+    def _apply_to_active_editor(self, new_code):
+        old_code = ""
+        try:
+            editor = self.api.get_active_editor()
+            if editor and editor.buffer:
+                if any(editor.buffer.has_selection(i) for i in range(len(editor.buffer.cursors))):
+                    old_code = editor.buffer.get_selected_text()
+        except:
+            pass
+
+        dlg = CodeDiffDialog(old_code, new_code, self)
+        if dlg.exec():
+            self.api.insert_text(new_code)
+            self.api.log("Código aplicado.")
+
+    def _apply_file_creation(self, path, content):
+        old_code = ""
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    old_code = f.read()
+            except:
+                pass
+        
+        dlg = CodeDiffDialog(old_code, content, self)
+        dlg.setWindowTitle(f"Confirmar: {os.path.basename(path)}")
+        
+        if dlg.exec():
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                self.api.log(f"Arquivo salvo: {path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erro", f"Erro ao salvar arquivo: {e}")
+
+    def _apply_patch(self, file_path, patch_text):
+        target_text = ""
+        editor = None
+        
+        if file_path and os.path.exists(file_path):
+             with open(file_path, 'r', encoding='utf-8') as f:
+                target_text = f.read()
+        else:
+            editor = self.api.get_active_editor()
+            if editor and editor.buffer:
+                target_text = editor.buffer.get_text()
+            else:
+                QMessageBox.warning(self, "Erro", "Nenhum alvo encontrado para aplicar o patch.")
+                return
+
+        pattern = r'<<<<<<< SEARCH\n(.*?)\n=======\n(.*?)\n>>>>>>> REPLACE'
+        matches = re.findall(pattern, patch_text, re.DOTALL)
+        
+        if not matches:
+            QMessageBox.warning(self, "Erro", "Formato de patch inválido.")
+            return
+
+        new_text = target_text
+        for search_block, replace_block in matches:
+            if search_block in new_text:
+                new_text = new_text.replace(search_block, replace_block, 1)
+            else:
+                QMessageBox.warning(self, "Erro", "Bloco de código original não encontrado.")
+                return
+
+        dlg = CodeDiffDialog(target_text, new_text, self)
+        if dlg.exec():
+            if file_path:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(new_text)
+                self.api.log(f"Patch aplicado em {file_path}")
+            elif editor:
+                # Usa cursores atuais para manter posição se possível, ou reseta
+                editor.buffer.replace_full_text(target_text, new_text, editor.buffer.cursors)
+                editor.viewport().update()
+                self.api.log("Patch aplicado no editor.")
 
     def show_settings(self):
         dlg = AISettingsDialog(self.api, self)
