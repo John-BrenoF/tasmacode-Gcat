@@ -12,6 +12,9 @@
 - Adicionar validação de `col` negativo em `select_word_at()` [3](#4-2) 
 - Implementar validações em todos os métodos públicos do buffer
 
+## [✔️] concluído ?
+
+
 ## Dia 2: Ajuste de Cursores + Auto-Pairing
 
 ### Manhã: Completar Ajuste de Cursores
@@ -23,6 +26,8 @@
 - Mover lógica de auto-pairing do `InputMapper` para comandos registráveis [6](#4-5) 
 - Implementar wrapping de seleção (TODO existente)
 - Criar configuração para habilitar/desabilitar auto-pairing
+
+## [ ] concluído ?
 
 ## Dia 3: Performance - Renderização + Busca de Brackets
 
@@ -36,6 +41,8 @@
 - Implementar cache de posições de brackets
 - Remover limite arbitrário de 1000 linhas
 
+## [ ] concluído ?
+
 ## Dia 4: API de Plugins + Tratamento de Erros
 
 ### Manhã: Expandir API de Plugins
@@ -47,6 +54,8 @@
 - Implementar fallback para terminal no Windows [8](#4-7) 
 - Adicionar fallback para fontes não encontradas
 - Implementar logging de erros centralizado
+
+## [ ] concluído ?
 
 ## Dia 5: Refatoração da MainWindow
 

@@ -132,8 +132,7 @@ class DocumentBuffer:
         """Remove todos os cursores extras, mantendo apenas o principal (último)."""
         if self.cursors:
             self.cursors = [self.cursors[-1]]
-
-    def insert_text(self, text: str) -> None:
+    def insert_text(self, text: str, record_action: bool = True) -> None:
         """Insere texto em todos os cursores. Se houver seleção, ela é substituída."""
         if any(self.has_selection(i) for i in range(len(self.cursors))):
             self.delete_selection()
@@ -152,12 +151,12 @@ class DocumentBuffer:
         for cursor in sorted_cursors:
             self._insert_at_single_cursor(cursor, text)
 
-        # Registra ação (TODO: Implementar lógica completa de diff)
-        self._undo_stack.append(Action('insert', text, cursors_snapshot, copy.deepcopy(self.cursors)))
-        self._redo_stack.clear()
+        if record_action:
+            self._undo_stack.append(Action('insert', text, cursors_snapshot, copy.deepcopy(self.cursors)))
+            self._redo_stack.clear()
         self.dirty = True
 
-    def insert_paired_text(self, pair: str) -> None:
+    def insert_paired_text(self, pair: str, record_action: bool = True) -> None:
         """Inserts a pair of characters (e.g., "()") and places the cursor in the middle.
            Wraps selection if it exists.
         """
@@ -194,8 +193,9 @@ class DocumentBuffer:
                 cursor.anchor_line = cursor.line
                 cursor.anchor_col = cursor.col
 
-        self._undo_stack.append(Action('insert_paired', pair, cursors_snapshot, copy.deepcopy(self.cursors)))
-        self._redo_stack.clear()
+        if record_action:
+            self._undo_stack.append(Action('insert_paired', pair, cursors_snapshot, copy.deepcopy(self.cursors)))
+            self._redo_stack.clear()
         self.dirty = True
 
     def replace_full_text(self, text_before: str, text_after: str, cursors_before: List[Cursor]):
@@ -310,12 +310,12 @@ class DocumentBuffer:
                 new_cursors.append(c)
         self.cursors = new_cursors
 
-    def delete_backspace(self) -> None:
+    def delete_backspace(self, record_action: bool = True) -> None:
         """Executa backspace. Se houver seleção, deleta a seleção."""
         if any(self.has_selection(i) for i in range(len(self.cursors))):
-            self.delete_selection()
+            self.delete_selection(record_action=record_action)
             self.dirty = True
-            self._redo_stack.clear()
+            if record_action: self._redo_stack.clear()
             return
 
         deleted_texts = []
@@ -334,13 +334,14 @@ class DocumentBuffer:
             deleted_texts.append(deleted)
         
         # A lista deleted_texts está na ordem dos cursores processados (reverso)
-        action = Action('delete', '', cursors_before, copy.deepcopy(self.cursors), deleted_texts=deleted_texts)
-        self._undo_stack.append(action)
+        if record_action:
+            action = Action('delete', '', cursors_before, copy.deepcopy(self.cursors), deleted_texts=deleted_texts)
+            self._undo_stack.append(action)
+            self._redo_stack.clear()
         
         self.dirty = True
-        self._redo_stack.clear()
 
-    def delete_selection(self) -> None:
+    def delete_selection(self, record_action: bool = True) -> None:
         """Deleta a seleção para todos os cursores."""
         deleted_texts = []
         sorted_indices = sorted(
@@ -357,11 +358,12 @@ class DocumentBuffer:
         
         self._merge_cursors()
         
-        action = Action('delete_selection', '', cursors_before, copy.deepcopy(self.cursors), deleted_texts=deleted_texts)
-        self._undo_stack.append(action)
+        if record_action:
+            action = Action('delete_selection', '', cursors_before, copy.deepcopy(self.cursors), deleted_texts=deleted_texts)
+            self._undo_stack.append(action)
+            self._redo_stack.clear()
         self.dirty = True
-        self._redo_stack.clear()
-
+        
     def _delete_single_selection(self, cursor_index: int) -> str:
         """Lógica interna para deletar a seleção de um único cursor."""
         range_ = self.get_selection_range(cursor_index)
@@ -412,7 +414,12 @@ class DocumentBuffer:
             deleted_char = txt[col-1]
             self._lines[line] = txt[:col-1] + txt[col:]
             cursor.col -= 1
-            # TODO: Ajustar cursores vizinhos na mesma linha
+            
+            # Ajusta cursores vizinhos na mesma linha
+            for other in self.cursors:
+                if other is not cursor and other.line == line and other.col >= col:
+                    other.col -= 1
+                    
         elif line > 0:
             # Merge com linha de cima
             deleted_char = "\n"
@@ -421,12 +428,19 @@ class DocumentBuffer:
             del self._lines[line]
             cursor.line -= 1
             cursor.col = prev_line_len
-            # TODO: Ajustar cursores abaixo (shift vertical negativo)
+            
+            # Ajusta cursores abaixo (shift vertical negativo)
+            for other in self.cursors:
+                if other is not cursor and other.line > line:
+                    other.line -= 1
+                elif other is not cursor and other.line == line:
+                    other.line -= 1
+                    other.col += prev_line_len
             
         return deleted_char
 
     def get_matching_bracket(self, line: int, col: int) -> Optional[Tuple[int, int]]:
-        """Encontra a posição do bracket correspondente (simples)."""
+        """Encontra a posição do bracket correspondente."""
         if line >= len(self._lines): return None
         
         text = self._lines[line]
@@ -540,18 +554,30 @@ class DocumentBuffer:
             # mas aqui vamos deixar o cursor voltar.
             # Melhor abordagem para este snippet: usar a lógica inversa do insert.
             pass # TODO: Implementar reversão exata de wrap
-
         elif action.type in ('delete', 'delete_selection'):
-            # Reverte deleção: re-insere o texto deletado
-            # deleted_texts está alinhado com cursors_before (que foi ordenado reverso na criação)
-            # Então iteramos e inserimos.
+            # Reverte deleção: re-insere o texto deletado.
             if action.deleted_texts:
-                for i, cursor in enumerate(action.cursors_before):
-                    if i < len(action.deleted_texts):
-                        self._insert_at_single_cursor(cursor, action.deleted_texts[i])
-            
-            self.cursors = [c.copy() for c in action.cursors_before]
+                # 1. Restaura os cursores para o estado *após* a deleção. É aqui que o texto será inserido.
+                self.cursors = [c.copy() for c in action.cursors_after]
 
+                # 2. Mapeia o texto deletado para a posição do cursor correspondente.
+                # A deleção original foi feita em ordem reversa de posição.
+                sorted_cursors_before = sorted(action.cursors_before, key=lambda c: (c.line, c.col), reverse=True)
+                sorted_cursors_after = sorted(action.cursors_after, key=lambda c: (c.line, c.col), reverse=True)
+                text_map = {ca.as_tuple(): dt for ca, dt in zip(sorted_cursors_after, action.deleted_texts)}
+
+                # 3. Ordena os cursores atuais (estado "after") para inserção (de cima para baixo).
+                cursors_to_insert_at = sorted(self.cursors, key=lambda c: (c.line, c.col))
+
+                # 4. Itera e insere o texto para cada cursor. A função _insert_at_single_cursor
+                #    modifica o cursor e ajusta os outros cursores em self.cursors.
+                for cursor in cursors_to_insert_at:
+                    text_to_insert = text_map.get(cursor.as_tuple())
+                    if text_to_insert:
+                        self._insert_at_single_cursor(cursor, text_to_insert)
+
+            # 5. Restaura os cursores para o estado que tinham antes da deleção original.
+            self.cursors = [c.copy() for c in action.cursors_before]
         elif action.type == 'replace_all':
             self._lines = action.text_before.split('\n')
             self.cursors = action.cursors_before
@@ -567,15 +593,25 @@ class DocumentBuffer:
         action = self._redo_stack.pop()
         
         if action.type == 'insert':
-            for cursor in action.cursors_before:
-                self._insert_at_single_cursor(cursor, action.text)
-            self.cursors = [c.copy() for c in action.cursors_after]
-            
+            self.cursors = [c.copy() for c in action.cursors_before]
+            self.insert_text(action.text, record_action=False)
+
+        elif action.type == 'insert_paired':
+            self.cursors = [c.copy() for c in action.cursors_before]
+            self.insert_paired_text(action.text, record_action=False)
+
         elif action.type in ('delete', 'delete_selection'):
-            # Re-aplica deleção
-            # Simplificação: chama delete_backspace/selection novamente ou usa lógica salva
-            # Para consistência exata, restauramos o estado final
-            pass # TODO: Implementar Redo granular
+            # Re-aplica a deleção restaurando os cursores para o estado anterior
+            # e chamando os métodos de deleção sem gravar uma nova ação.
+            self.cursors = [c.copy() for c in action.cursors_before]
+            if action.type == 'delete_selection':
+                self.delete_selection(record_action=False)
+            else:
+                self.delete_backspace(record_action=False)
+
+        elif action.type == 'replace_all':
+            self._lines = action.text.split('\n')
+            self.cursors = [c.copy() for c in action.cursors_after]
+            self.dirty = True
             
         self._undo_stack.append(action)
-        self.dirty = True
