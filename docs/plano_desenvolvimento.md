@@ -41,7 +41,7 @@
 - Implementar cache de posições de brackets
 - Remover limite arbitrário de 1000 linhas
 
-## [ ] concluído ?
+## [✔️] concluído ?
 
 ## Dia 4: API de Plugins + Tratamento de Erros
 

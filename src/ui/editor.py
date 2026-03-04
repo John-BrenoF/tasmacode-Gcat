@@ -294,6 +294,28 @@ class CodeEditor(QAbstractScrollArea):
         if move_back > 0:
             self.buffer.move_cursors(0, -move_back)
 
+    def invalidate_line_range(self, start_line: int, end_line: int):
+        """Invalida apenas um range de linhas para repintura seletiva."""
+        if not self.buffer: return
+        
+        start_line = max(0, start_line)
+        end_line = min(self.buffer.line_count - 1, end_line)
+        
+        scroll_y = self.verticalScrollBar().value()
+        top_y = (start_line * self.line_height) - scroll_y
+        height = (end_line - start_line + 1) * self.line_height
+        
+        rect = QRect(0, int(top_y), self.viewport().width(), int(height))
+        self.viewport().update(rect)
+
+    def invalidate_cursor_area(self):
+        """Invalida apenas a área dos cursores para performance."""
+        if not self.buffer: return
+        
+        # Invalida a linha de cada cursor
+        for cursor in self.buffer.cursors:
+            self.invalidate_line_range(cursor.line, cursor.line)
+
     # --- Lógica do Gutter de Linhas ---
     def line_number_area_width(self):
         if not self.show_line_numbers:
@@ -374,13 +396,15 @@ class CodeEditor(QAbstractScrollArea):
             painter.drawText(0, y, self.line_number_area.width() - 5, self.line_height, Qt.AlignmentFlag.AlignRight, str(line_idx + 1))
 
     def paintEvent(self, event):
-        """Renderiza o texto e os cursores."""
+        """Renderiza o texto e os cursores com viewport culling otimizado."""
         if not self.buffer or not self.theme:
             return
 
         painter = QPainter(self.viewport())
         painter.setFont(self.font)
         
+        # Otimização: só processa a região danificada
+        damaged_rect = event.rect()
         
         # Cores do tema
         bg_color = QColor(self.theme.get_color("background"))
@@ -391,18 +415,22 @@ class CodeEditor(QAbstractScrollArea):
         search_hl_color.setAlpha(80) # Semi-transparente
         selection_color = QColor(self.theme.get_color("selection"))
         
-        # Preenche fundo
-        painter.fillRect(event.rect(), bg_color)
+        # Preenche fundo (apenas a região danificada)
+        painter.fillRect(damaged_rect, bg_color)
         
         # Cálculo de visibilidade (Otimização)
         scroll_y = self.verticalScrollBar().value()
-        viewport_h = self.viewport().height()
         
-        first_line = scroll_y // self.line_height
-        lines_visible = (viewport_h // self.line_height) + 2
+        # Calcula linhas visíveis baseado na região danificada
+        first_line = max(0, (damaged_rect.top() + scroll_y) // self.line_height)
+        last_line = min(self.buffer.line_count - 1, 
+                       (damaged_rect.bottom() + scroll_y) // self.line_height)
+        
+        if first_line > last_line:
+            return # Nenhuma linha a ser desenhada na região
         
         # Obtém linhas do buffer
-        lines = self.buffer.get_lines(first_line, first_line + lines_visible)
+        lines = self.buffer.get_lines(first_line, last_line + 1)
         
         # Posições dos cursores para destaque de linha
         active_lines = {c.line for c in self.buffer.cursors}
@@ -416,11 +444,16 @@ class CodeEditor(QAbstractScrollArea):
             (start_line, start_col), (end_line, end_col) = selection_range
 
             # Itera apenas sobre as linhas visíveis que estão na seleção
-            visible_start = max(start_line, first_line)
-            visible_end = min(end_line, first_line + lines_visible)
+            visible_start = max(start_line, first_line) # Interseção da seleção com a área danificada
+            visible_end = min(end_line, last_line)
 
             for line_idx in range(visible_start, visible_end + 1):
                 y = (line_idx * self.line_height) - scroll_y
+                
+                # Pula linhas que não estão na região danificada (verificação extra)
+                line_rect = QRect(0, int(y), self.viewport().width(), self.line_height)
+                if not line_rect.intersects(damaged_rect):
+                    continue
                 
                 sel_start_x = start_col * self.char_width if line_idx == start_line else 0
                 sel_end_x = end_col * self.char_width if line_idx == end_line else self.viewport().width()
@@ -433,6 +466,11 @@ class CodeEditor(QAbstractScrollArea):
         for i, line_text in enumerate(lines):
             line_idx = first_line + i
             y = (line_idx * self.line_height) - scroll_y
+            
+            # Pula linhas fora da região danificada
+            line_rect = QRect(0, int(y), self.viewport().width(), self.line_height)
+            if not line_rect.intersects(damaged_rect):
+                continue
             
             # 1. Active Line Highlight
             if line_idx in active_lines:
@@ -505,7 +543,7 @@ class CodeEditor(QAbstractScrollArea):
             
             for cursor in self.buffer.cursors:
                 # Só desenha se estiver visível
-                if first_line <= cursor.line <= first_line + lines_visible:
+                if first_line <= cursor.line <= last_line:
                     cx = cursor.col * self.char_width
                     cy = (cursor.line * self.line_height) - scroll_y
                     painter.drawRect(cx, cy, 2, self.line_height)
