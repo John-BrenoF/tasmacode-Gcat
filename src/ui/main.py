@@ -46,6 +46,7 @@ from src.serv_live.live_server_manager import LiveServerManager
 from src.core.github_auth import GithubAuth
 from src.ui.profile_window import ProfileWindow
 from src.ui.custom_title_bar import CustomTitleBar
+from src.core.ui_logic.font_manager import FontManager
 
 class JCodeMainWindow(QMainWindow):
     """Janela principal do editor JCODE.
@@ -60,6 +61,7 @@ class JCodeMainWindow(QMainWindow):
         self.active_editor = None
         
         # --- 2. Inicialização dos Subsistemas de UI Logic ---
+        self.config_manager = ConfigManager()
         self.highlighter = SyntaxHighlighter()
         self.search_manager = SearchManager()
         self.extension_bridge = ExtensionBridge()
@@ -68,9 +70,12 @@ class JCodeMainWindow(QMainWindow):
         themes_path = os.path.join(root_dir, "themes")
         self.theme_manager = ThemeManager(themes_path)
         
+        # Gerenciador de Fontes
+        user_fonts_path = os.path.join(self.config_manager.config_dir, "fonts")
+        self.font_manager = FontManager(user_fonts_path)
+        
         self.command_registry = CommandRegistry()
         self.session_manager = SessionManager()
-        self.config_manager = ConfigManager()
         self.input_mapper = InputMapper(self.command_registry)
         self.github_auth = GithubAuth(self.config_manager.config_dir)
         self.github_auth.auth_changed.connect(self._update_user_avatar)
@@ -623,7 +628,7 @@ class JCodeMainWindow(QMainWindow):
         menu.exec(QCursor.pos())
 
     def _show_settings_dialog(self):
-        dlg = SettingsDialog(self.config_manager, self.theme_manager, self)
+        dlg = SettingsDialog(self.config_manager, self.theme_manager, self.font_manager, self)
         dlg.exec()
 
     def _apply_config_globally(self, config):

@@ -1,15 +1,16 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, 
-                               QLabel, QSlider, QCheckBox, QComboBox, QPushButton, QDialogButtonBox, QLineEdit, QSpinBox, QColorDialog)
+                               QLabel, QSlider, QCheckBox, QComboBox, QPushButton, QDialogButtonBox, QLineEdit, QSpinBox, QColorDialog, QFileDialog, QMessageBox, QCompleter)
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont
 
 class SettingsDialog(QDialog):
     """Janela de preferências do usuário."""
 
-    def __init__(self, config_manager, theme_manager, parent=None):
+    def __init__(self, config_manager, theme_manager, font_manager, parent=None):
         super().__init__(parent)
         self.config_manager = config_manager
         self.theme_manager = theme_manager
+        self.font_manager = font_manager
         
         # Cópia local das configurações para edição
         self.current_config = config_manager.config.copy()
@@ -43,6 +44,44 @@ class SettingsDialog(QDialog):
         # --- Configuração da Aba Editor ---
         editor_layout = QVBoxLayout(self.tab_editor)
         
+        # Família da Fonte
+        lbl_font_family = QLabel("Fonte do Editor:")
+        
+        font_selection_layout = QHBoxLayout()
+        self.combo_font_family = QComboBox()
+        self.combo_font_family.setStyleSheet("background-color: #3c3c3c; color: white; padding: 5px;")
+        # Torna o ComboBox pesquisável
+        self.combo_font_family.setEditable(True)
+        self.combo_font_family.setInsertPolicy(QComboBox.NoInsert)
+        self.combo_font_family.completer().setCompletionMode(QCompleter.PopupCompletion)
+        self.combo_font_family.completer().setFilterMode(Qt.MatchContains)
+        
+        btn_install_font = QPushButton("Instalar Fonte (ZIP)")
+        btn_install_font.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_install_font.setStyleSheet("background-color: #3c3c3c; color: white; padding: 5px; border: 1px solid #454545;")
+        btn_install_font.clicked.connect(self._install_font_zip)
+        
+        font_selection_layout.addWidget(self.combo_font_family)
+        font_selection_layout.addWidget(btn_install_font)
+        
+        # Preview Label
+        self.lbl_font_preview = QLabel("The quick brown fox jumps over the lazy dog. 1234567890")
+        self.lbl_font_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_font_preview.setFixedHeight(40)
+        self.lbl_font_preview.setStyleSheet("background-color: #1e1e1e; color: #cccccc; border: 1px solid #454545; border-radius: 4px; margin-top: 5px; font-size: 14px;")
+        
+        monospace_fonts = self.font_manager.get_monospace_fonts()
+        self.combo_font_family.addItems(monospace_fonts)
+        current_font = self.current_config.get('font_family', 'JetBrainsMono Nerd Font')
+        if current_font in monospace_fonts:
+            self.combo_font_family.setCurrentText(current_font)
+            
+        self.combo_font_family.currentTextChanged.connect(self._update_font_preview)
+        self.combo_font_family.currentTextChanged.connect(lambda v: (self._update_local('font_family', v), self._apply_live()))
+        
+        # Initial preview
+        self._update_font_preview(self.combo_font_family.currentText())
+
         # Tamanho da Fonte
         lbl_font = QLabel(f"Tamanho da Fonte: {self.current_config.get('font_size')}")
         slider_font = QSlider(Qt.Orientation.Horizontal)
@@ -50,6 +89,11 @@ class SettingsDialog(QDialog):
         slider_font.setValue(self.current_config.get('font_size'))
         slider_font.valueChanged.connect(lambda v: (lbl_font.setText(f"Tamanho da Fonte: {v}"), self._update_local('font_size', v), self._apply_live()))
         
+        # Ligaduras
+        chk_ligatures = QCheckBox("Habilitar Ligaduras de Fonte")
+        chk_ligatures.setChecked(self.current_config.get('font_ligatures', True))
+        chk_ligatures.toggled.connect(lambda v: (self._update_local('font_ligatures', v), self._apply_live()))
+
         # Checkboxes
         chk_lines = QCheckBox("Mostrar Números de Linha")
         chk_lines.setChecked(self.current_config.get('line_numbers'))
@@ -119,8 +163,12 @@ class SettingsDialog(QDialog):
         lbl_beta = QLabel("Nota: Funcionalidade em testes beta. Pode apresentar instabilidade.")
         lbl_beta.setStyleSheet("color: #808080; font-style: italic; font-size: 11px; margin-left: 20px;")
 
+        editor_layout.addWidget(lbl_font_family)
+        editor_layout.addLayout(font_selection_layout)
+        editor_layout.addWidget(self.lbl_font_preview)
         editor_layout.addWidget(lbl_font)
         editor_layout.addWidget(slider_font)
+        editor_layout.addWidget(chk_ligatures)
         editor_layout.addWidget(chk_lines)
         editor_layout.addWidget(chk_indent)
         editor_layout.addWidget(chk_autocomplete)
@@ -230,6 +278,36 @@ class SettingsDialog(QDialog):
 
     def _update_local(self, key, value):
         self.current_config[key] = value
+
+    def _update_font_preview(self, font_family):
+        font = QFont(font_family)
+        font.setPointSize(12)
+        self.lbl_font_preview.setFont(font)
+
+    def _install_font_zip(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Selecionar Arquivo de Fonte (ZIP)", "", "Zip Files (*.zip)")
+        if file_path:
+            installed_families = self.font_manager.install_font_from_zip(file_path)
+            if installed_families:
+                QMessageBox.information(self, "Sucesso", f"Fontes instaladas: {', '.join(installed_families)}")
+                
+                # Refresh list
+                self.combo_font_family.blockSignals(True)
+                self.combo_font_family.clear()
+                fonts = self.font_manager.get_monospace_fonts()
+                self.combo_font_family.addItems(fonts)
+                
+                # Seleciona e aplica a primeira fonte instalada
+                new_font_to_select = installed_families[0]
+                if new_font_to_select in fonts:
+                    self.combo_font_family.setCurrentText(new_font_to_select)
+
+                self.combo_font_family.blockSignals(False)
+                self._update_font_preview(self.combo_font_family.currentText())
+                self._update_local('font_family', self.combo_font_family.currentText())
+                self._apply_live()
+            else:
+                QMessageBox.warning(self, "Erro", "Falha ao instalar fontes. Verifique se o arquivo é um ZIP válido contendo fontes (.ttf, .otf).")
 
     def _on_preset_changed(self, text):
         self._update_local("smear_physics_preset", text)

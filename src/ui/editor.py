@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QAbstractScrollArea
 from PySide6.QtCore import Signal, Qt, QTimer, QRect, QPoint
-from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen
+from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QFontInfo
 from plugins.line_number_area import LineNumberArea
 from .autocomplete_widget import AutocompleteWidget, ParameterHintWidget
 
@@ -29,12 +29,15 @@ class CodeEditor(QAbstractScrollArea):
         
         # Configuração de Fonte e Métricas
         # Tenta usar fontes modernas, fallback para Monospace genérico
-        self.font = QFont("JetBrains Mono")
+        self.font = QFont("JetBrainsMono Nerd Font")
         self.font.setStyleHint(QFont.StyleHint.Monospace)
+        self.font.setStyleStrategy(QFont.StyleStrategy.PreferQuality) # Habilita ligaduras por padrão
         if not self.font.exactMatch():
-            self.font = QFont("Consolas")
+            self.font = QFont("JetBrains Mono")
             if not self.font.exactMatch():
-                self.font = QFont("Monospace")
+                self.font = QFont("Consolas")
+                if not self.font.exactMatch():
+                    self.font = QFont("Monospace")
         
         self.font.setPointSize(12)
         self.font_metrics = QFontMetrics(self.font)
@@ -309,14 +312,28 @@ class CodeEditor(QAbstractScrollArea):
 
     def update_settings(self, settings: dict):
         """Aplica configurações dinâmicas ao editor."""
-        # Fonte
+        # Família e Tamanho da Fonte
+        font_family = settings.get("font_family", "JetBrainsMono Nerd Font")
         font_size = settings.get("font_size", 12)
-        if self.font.pointSize() != font_size:
-            self.font.setPointSize(font_size)
+        ligatures = settings.get("font_ligatures", True)
+        
+        if self.font.family() != font_family or self.font.pointSize() != font_size or self.font.styleStrategy() != (QFont.StyleStrategy.PreferQuality if ligatures else QFont.StyleStrategy.PreferDefault):
+            new_font = QFont(font_family, font_size)
+            new_font.setStyleHint(QFont.StyleHint.Monospace)
+            
+            if ligatures:
+                new_font.setStyleStrategy(QFont.StyleStrategy.PreferQuality)
+            
+            # Verifica se a fonte foi encontrada, senão usa fallback
+            font_info = QFontInfo(new_font)
+            if font_info.family().lower() != font_family.lower():
+                print(f"Fonte '{font_family}' não encontrada, usando fallback 'Monospace'.")
+                new_font = QFont("Monospace", font_size)
+
+            self.font = new_font
             self.font_metrics = QFontMetrics(self.font)
             self.line_height = self.font_metrics.height()
             self.char_width = self.font_metrics.horizontalAdvance(' ')
-        
         # Preferências
         self.show_line_numbers = settings.get("line_numbers", True)
         self.auto_indent = settings.get("auto_indent", True)
