@@ -33,3 +33,7 @@ class Shortcuts:
     
     # Ajuda
     HELP = "F1"
+    
+    # Marcadores
+    NEXT_MARKER = "Alt+."
+    PREV_MARKER = "Alt+,"

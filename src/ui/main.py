@@ -390,6 +390,10 @@ class JCodeMainWindow(QMainWindow):
         r.register("cursor.add_up", lambda: get_active_buffer_and_execute("add_cursor_relative", -1))
         r.register("cursor.add_down", lambda: get_active_buffer_and_execute("add_cursor_relative", 1))
         
+        # Comandos de Marcadores
+        r.register("editor.next_marker", lambda: self.active_editor.go_to_next_marker() if self.active_editor else None)
+        r.register("editor.prev_marker", lambda: self.active_editor.go_to_prev_marker() if self.active_editor else None)
+        
         # Comandos de Histórico
         def safe_undo():
             if self.active_editor and self.active_editor.buffer and self.active_editor.buffer.can_undo:

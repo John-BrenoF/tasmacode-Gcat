@@ -1,8 +1,9 @@
-from PySide6.QtWidgets import QAbstractScrollArea
-from PySide6.QtCore import Signal, Qt, QTimer, QRect, QPoint
+from PySide6.QtWidgets import QAbstractScrollArea, QMenu, QInputDialog, QColorDialog
+from PySide6.QtCore import Signal, Qt, QTimer, QRect, QPoint, QEvent
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QFontInfo
 from plugins.line_number_area import LineNumberArea
 from .autocomplete_widget import AutocompleteWidget, ParameterHintWidget
+from src.core.editor_logic.marker_manager import MarkerManager
 
 class CodeEditor(QAbstractScrollArea):
     """Canvas de edição de código com renderização customizada.
@@ -30,6 +31,7 @@ class CodeEditor(QAbstractScrollArea):
         self.show_line_numbers = True
         self.auto_indent = True
         self.autocomplete_enabled = False
+        self.marker_manager = MarkerManager()
         
         # Configuração de Fonte e Métricas
         # Tenta usar fontes modernas, fallback para Monospace genérico
@@ -71,6 +73,7 @@ class CodeEditor(QAbstractScrollArea):
         
         # Gutter de Linhas
         self.line_number_area = LineNumberArea(self)
+        self.line_number_area.installEventFilter(self) # Instala filtro para capturar clique direito
         # Conecta os sinais de scroll para atualizar a área de números de linha
         self.verticalScrollBar().valueChanged.connect(self.line_number_area.update)
         self.horizontalScrollBar().valueChanged.connect(self.line_number_area.update)
@@ -119,6 +122,73 @@ class CodeEditor(QAbstractScrollArea):
         else:
             self.text_changed.emit()
             super().keyPressEvent(event)
+
+    def eventFilter(self, obj, event):
+        """Filtra eventos para detectar clique direito na área de números."""
+        if hasattr(self, 'line_number_area') and obj == self.line_number_area and event.type() == QEvent.Type.ContextMenu:
+            self._show_gutter_context_menu(event.globalPos())
+            return True
+        return super().eventFilter(obj, event)
+
+    def _show_gutter_context_menu(self, global_pos):
+        """Exibe o menu de contexto para marcadores."""
+        # Calcula a linha baseada na posição do mouse relativa ao widget
+        local_pos = self.line_number_area.mapFromGlobal(global_pos)
+        y = local_pos.y()
+        scroll_y = self.verticalScrollBar().value()
+        
+        # Ajuste para word wrap se necessário, mas para gutter simples usamos altura fixa
+        # Nota: Se word wrap estiver ativo, a lógica de Y para linha lógica é mais complexa.
+        # Aqui usamos uma aproximação baseada na visualização atual.
+        if self.word_wrap_enabled and self._visual_lines:
+             visual_idx = (y + scroll_y) // self.line_height
+             if visual_idx < len(self._visual_lines):
+                 line_number, _ = self._visual_lines[visual_idx]
+             else:
+                 return
+        else:
+            line_number = (y + scroll_y) // self.line_height
+        
+        if line_number >= self.buffer.line_count:
+            return
+
+        menu = QMenu(self)
+        # Estilo básico para o menu
+        menu.setStyleSheet("QMenu { background-color: #252526; color: #cccccc; border: 1px solid #454545; } QMenu::item:selected { background-color: #007acc; }")
+
+        has_marker = self.marker_manager.has_marker(line_number)
+        
+        action_toggle = menu.addAction("Remover Marcador" if has_marker else "Marcar Linha")
+        action_toggle.triggered.connect(lambda: self._toggle_marker(line_number))
+        
+        if has_marker:
+            action_tag = menu.addAction("Adicionar/Editar Tag")
+            action_tag.triggered.connect(lambda: self._edit_marker_tag(line_number))
+            
+            action_color = menu.addAction("Alterar Cor")
+            action_color.triggered.connect(lambda: self._edit_marker_color(line_number))
+
+        menu.exec(global_pos)
+
+    def _toggle_marker(self, line):
+        self.marker_manager.toggle_marker(line)
+        self.line_number_area.update()
+
+    def _edit_marker_tag(self, line):
+        marker = self.marker_manager.get_marker(line)
+        if not marker: return
+        text, ok = QInputDialog.getText(self, "Tag do Marcador", "Texto da Tag:", text=marker.label)
+        if ok:
+            marker.label = text
+            self.line_number_area.update()
+            
+    def _edit_marker_color(self, line):
+        marker = self.marker_manager.get_marker(line)
+        if not marker: return
+        color = QColorDialog.getColor(QColor(marker.color), self, "Cor do Marcador")
+        if color.isValid():
+            marker.color = color.name()
+            self.line_number_area.update()
 
     def mousePressEvent(self, event):
         """Trata o clique do mouse para posicionar o cursor."""
@@ -367,6 +437,70 @@ class CodeEditor(QAbstractScrollArea):
         for cursor in self.buffer.cursors:
             self.invalidate_line_range(cursor.line, cursor.line)
 
+    def go_to_next_marker(self):
+        """Move o cursor para o próximo marcador."""
+        if not self.buffer or not self.buffer.cursors: return
+        current_line = self.buffer.cursors[-1].line
+        markers = sorted(self.marker_manager.get_all_markers().keys())
+        if not markers: return
+        
+        next_line = None
+        for line in markers:
+            if line > current_line:
+                next_line = line
+                break
+        
+        if next_line is None:
+            next_line = markers[0] # Wrap around (volta ao início)
+            
+        self.buffer.clear_cursors()
+        self.buffer.update_last_cursor(next_line, 0)
+        self._ensure_cursor_visible()
+        self.viewport().update()
+        self.cursor_moved.emit()
+
+    def go_to_prev_marker(self):
+        """Move o cursor para o marcador anterior."""
+        if not self.buffer or not self.buffer.cursors: return
+        current_line = self.buffer.cursors[-1].line
+        markers = sorted(self.marker_manager.get_all_markers().keys())
+        if not markers: return
+        
+        prev_line = None
+        for line in reversed(markers):
+            if line < current_line:
+                prev_line = line
+                break
+        
+        if prev_line is None:
+            prev_line = markers[-1] # Wrap around (volta ao fim)
+            
+        self.buffer.clear_cursors()
+        self.buffer.update_last_cursor(prev_line, 0)
+        self._ensure_cursor_visible()
+        self.viewport().update()
+        self.cursor_moved.emit()
+
+    def _ensure_cursor_visible(self):
+        """Rola a visualização para garantir que o cursor principal esteja visível."""
+        if not self.buffer or not self.buffer.cursors: return
+        cursor = self.buffer.cursors[-1]
+        
+        y = 0
+        if self.word_wrap_enabled and self._visual_lines:
+            visual_line_idx, _ = self._get_visual_pos_for_cursor(cursor.line, cursor.col)
+            y = visual_line_idx * self.line_height
+        else:
+            y = cursor.line * self.line_height
+            
+        scroll_y = self.verticalScrollBar().value()
+        viewport_h = self.viewport().height()
+        
+        if y < scroll_y:
+            self.verticalScrollBar().setValue(int(y))
+        elif y + self.line_height > scroll_y + viewport_h:
+            self.verticalScrollBar().setValue(int(y + self.line_height - viewport_h))
+
     def _get_visual_pos_for_cursor(self, log_line, log_col):
         if not self.word_wrap_enabled or not self._visual_lines:
             return log_line, log_col
@@ -517,6 +651,15 @@ class CodeEditor(QAbstractScrollArea):
                 
                 if start_col == 0:
                     y = (visual_line_idx * self.line_height) - scroll_y
+                    
+                    # Desenha Marcador se existir
+                    if self.marker_manager.has_marker(logical_line_idx):
+                        marker = self.marker_manager.get_marker(logical_line_idx)
+                        painter.setBrush(QColor(marker.color))
+                        painter.setPen(Qt.NoPen)
+                        # Círculo pequeno à esquerda
+                        painter.drawEllipse(QPoint(6, int(y + self.line_height / 2)), 3, 3)
+
                     if logical_line_idx in active_lines:
                         painter.setPen(active_color)
                         painter.setFont(bold_font)
@@ -536,6 +679,14 @@ class CodeEditor(QAbstractScrollArea):
                 line_idx = first_line + i
                 if line_idx >= self.buffer.line_count: break
                 y = (line_idx * self.line_height) - scroll_y
+                
+                # Desenha Marcador se existir
+                if self.marker_manager.has_marker(line_idx):
+                    marker = self.marker_manager.get_marker(line_idx)
+                    painter.setBrush(QColor(marker.color))
+                    painter.setPen(Qt.NoPen)
+                    # Círculo pequeno à esquerda
+                    painter.drawEllipse(QPoint(6, int(y + self.line_height / 2)), 3, 3)
                 
                 if line_idx in active_lines:
                     painter.setPen(active_color)

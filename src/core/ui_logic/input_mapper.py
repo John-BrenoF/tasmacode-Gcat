@@ -40,6 +40,9 @@ class InputMapper(QObject):
             "Ctrl+Shift+Z": "edit.redo",
             # Rename
             "F2": "edit.rename",
+            # Marcadores
+            "Alt+.": "editor.next_marker",
+            "Alt+,": "editor.prev_marker",
             # Project
             "Ctrl+R": "view.switch_project",
              "Ctrl+H": "view.toggle_ai_chat"
