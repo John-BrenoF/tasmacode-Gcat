@@ -41,3 +41,6 @@ class Shortcuts:
     # Zoom
     ZOOM_IN = QKeySequence.StandardKey.ZoomIn
     ZOOM_OUT = QKeySequence.StandardKey.ZoomOut
+
+    # Easter Egg
+    BATATA = "Ctrl+G"

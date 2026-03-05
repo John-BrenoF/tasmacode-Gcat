@@ -47,6 +47,7 @@ from src.core.github_auth import GithubAuth
 from src.ui.profile_window import ProfileWindow
 from src.ui.custom_title_bar import CustomTitleBar
 from src.core.ui_logic.font_manager import FontManager
+from src.ui.batata_window import BatataWindow
 from src.core.editor_logic.marker_manager import MarkerManager
 
 class JCodeMainWindow(QMainWindow):
@@ -353,6 +354,11 @@ class JCodeMainWindow(QMainWindow):
         self.zoom_out_action.setShortcut(Shortcuts.ZOOM_OUT)
         self.zoom_out_action.triggered.connect(self._zoom_out)
 
+        # --- Batata Action ---
+        self.show_batata_action = QAction("Mostrar Batata", self)
+        self.show_batata_action.setShortcut(Shortcuts.BATATA)
+        self.show_batata_action.triggered.connect(self._show_batata_window)
+
         # --- Help Actions ---
         self.show_help_action = QAction("Guia de Atalhos", self)
         self.show_help_action.setShortcut(Shortcuts.HELP)
@@ -365,9 +371,9 @@ class JCodeMainWindow(QMainWindow):
         self.addActions([
             self.new_file_action, self.save_action, self.undo_action, self.redo_action,
             self.cut_action, self.copy_action, self.paste_action, self.find_action, self.rename_action, self.switch_project_action,
-            self.toggle_sidebar_action, self.toggle_right_sidebar_action, self.focus_sidebar_search_action, self.show_help_action, self.close_tab_action,
-            self.refresh_explorer_action, self.next_tab_action, self.prev_tab_action,
-            self.zoom_in_action, self.zoom_out_action
+            self.toggle_sidebar_action, self.toggle_right_sidebar_action, self.focus_sidebar_search_action, self.show_help_action, self.close_tab_action, self.refresh_explorer_action, self.next_tab_action, self.prev_tab_action,
+            self.zoom_in_action, self.zoom_out_action,
+            self.show_batata_action
         ])
 
     def _register_core_commands(self):
@@ -877,6 +883,12 @@ class JCodeMainWindow(QMainWindow):
         dialog.exec()
         # Restaura o tema salvo após fechar o diálogo
         self._apply_config_globally(self.config_manager.config)
+
+    def _show_batata_window(self):
+        """Exibe a janela da batata."""
+        dlg = BatataWindow(self)
+        self._apply_theme_to_dialog(dlg)
+        dlg.exec()
 
     def _show_profile_window(self):
         """Abre a janela de perfil do GitHub."""
