@@ -14,12 +14,13 @@ class TopLeftGrip(QWidget):
         super().__init__(parent)
         self.setFixedSize(15, 15)
         self.setCursor(Qt.CursorShape.SizeFDiagCursor)
-        
+         # minha mae nao pode ve esse codigo 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#666666"))
+        painter.setBrush(QColor("#666666")) 
+        
         
         # Desenha pontos formando um triângulo no canto superior esquerdo
         painter.drawEllipse(2, 2, 3, 3)

@@ -13,3 +13,4 @@ __pycache__/
 src/ui/__pycache__/
 src/core/editor_logic/__pycache__/
 src/core/__pycache__/
+plugins/code_ia/__pycache__

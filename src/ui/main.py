@@ -344,6 +344,15 @@ class JCodeMainWindow(QMainWindow):
         self.prev_tab_action.setShortcut(Shortcuts.PREV_TAB)
         self.prev_tab_action.triggered.connect(self._prev_tab)
 
+        # --- Zoom Actions ---
+        self.zoom_in_action = QAction("Aumentar Zoom", self)
+        self.zoom_in_action.setShortcut(Shortcuts.ZOOM_IN)
+        self.zoom_in_action.triggered.connect(self._zoom_in)
+
+        self.zoom_out_action = QAction("Diminuir Zoom", self)
+        self.zoom_out_action.setShortcut(Shortcuts.ZOOM_OUT)
+        self.zoom_out_action.triggered.connect(self._zoom_out)
+
         # --- Help Actions ---
         self.show_help_action = QAction("Guia de Atalhos", self)
         self.show_help_action.setShortcut(Shortcuts.HELP)
@@ -356,9 +365,9 @@ class JCodeMainWindow(QMainWindow):
         self.addActions([
             self.new_file_action, self.save_action, self.undo_action, self.redo_action,
             self.cut_action, self.copy_action, self.paste_action, self.find_action, self.rename_action, self.switch_project_action,
-            self.toggle_sidebar_action, self.toggle_right_sidebar_action, self.focus_sidebar_search_action, self.show_help_action,
-            self.close_tab_action,
-            self.refresh_explorer_action, self.next_tab_action, self.prev_tab_action
+            self.toggle_sidebar_action, self.toggle_right_sidebar_action, self.focus_sidebar_search_action, self.show_help_action, self.close_tab_action,
+            self.refresh_explorer_action, self.next_tab_action, self.prev_tab_action,
+            self.zoom_in_action, self.zoom_out_action
         ])
 
     def _register_core_commands(self):
@@ -744,13 +753,21 @@ class JCodeMainWindow(QMainWindow):
         self.theme_manager.load_theme(theme_name)
         self.theme_manager.apply_theme(QApplication.instance())
         
+        # 2. Fonte Global da UI (afetada pelo zoom)
+        # O tamanho da fonte do editor é usado como base para o zoom global.
+        font_size = config.get("font_size", 12)
+        app_font = QApplication.instance().font()
+        # Ajusta o tamanho da fonte padrão da aplicação. Widgets específicos podem sobrescrever.
+        app_font.setPointSize(font_size)
+        QApplication.instance().setFont(app_font)
+        
         self.custom_statusbar.apply_theme(self.theme_manager.current_theme)
         self.right_sidebar.apply_theme(self.theme_manager.current_theme)
         
         if hasattr(self, 'custom_title_bar'):
             self.custom_title_bar.apply_theme(self.theme_manager.current_theme)
             
-        # 2. Editor (Propaga para todas as abas)
+        # 3. Editor (Propaga para todas as abas)
         for i in range(self.editor_group.tab_widget.count()):
             editor = self.editor_group.tab_widget.widget(i)
             if isinstance(editor, CodeEditor):
@@ -1436,6 +1453,25 @@ class JCodeMainWindow(QMainWindow):
         
         self.session_manager.save_session(root_path, open_files, active_path)
 
+    def _zoom_in(self):
+        """Aumenta o tamanho da fonte global."""
+        current_size_val = self.config_manager.get("font_size")
+        current_size = current_size_val if current_size_val is not None else 12
+        new_size = min(current_size + 1, 72) # Limite máximo de 72
+        if new_size != current_size:
+            self.config_manager.config["font_size"] = new_size
+            self._apply_config_globally(self.config_manager.config)
+            self.custom_statusbar.showMessage(f"Zoom: {int((new_size/12)*100)}%", 1000)
+
+    def _zoom_out(self):
+        """Diminui o tamanho da fonte global."""
+        current_size_val = self.config_manager.get("font_size")
+        current_size = current_size_val if current_size_val is not None else 12
+        new_size = max(current_size - 1, 6) # Limite mínimo de 6
+        if new_size != current_size:
+            self.config_manager.config["font_size"] = new_size
+            self._apply_config_globally(self.config_manager.config)
+            self.custom_statusbar.showMessage(f"Zoom: {int((new_size/12)*100)}%", 1000)
 
     def _update_user_avatar(self):
         """Atualiza o avatar na barra de status."""

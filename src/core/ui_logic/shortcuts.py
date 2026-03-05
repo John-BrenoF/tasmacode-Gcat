@@ -37,3 +37,7 @@ class Shortcuts:
     # Marcadores
     NEXT_MARKER = "Alt+."
     PREV_MARKER = "Alt+,"
+    
+    # Zoom
+    ZOOM_IN = QKeySequence.StandardKey.ZoomIn
+    ZOOM_OUT = QKeySequence.StandardKey.ZoomOut
