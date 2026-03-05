@@ -666,8 +666,74 @@ class JCodeMainWindow(QMainWindow):
         menu.addAction("Sair (Logout)", self.github_auth.logout)
         menu.exec(QCursor.pos())
 
+    def _apply_theme_to_dialog(self, dialog):
+        """Aplica o tema atual a um diálogo injetando stylesheet."""
+        if not self.theme_manager or not self.theme_manager.current_theme:
+            return
+            
+        theme = self.theme_manager.current_theme
+        bg = theme.get("background", "#252526")
+        fg = theme.get("foreground", "#cccccc")
+        border = theme.get("border_color", "#3e3e42")
+        sidebar_bg = theme.get("sidebar_bg", "#252526")
+        accent = theme.get("accent", "#007acc")
+        
+        # Estilo genérico para dialogs que cobre a maioria dos widgets padrão
+        style = f"""
+            QDialog {{
+                background-color: {bg};
+                color: {fg};
+            }}
+            QWidget {{
+                color: {fg};
+            }}
+            QLabel {{
+                color: {fg};
+                background-color: transparent;
+            }}
+            QPushButton {{
+                background-color: {sidebar_bg};
+                color: {fg};
+                border: 1px solid {border};
+                padding: 6px 12px;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: {border};
+            }}
+            QPushButton:pressed {{
+                background-color: {accent};
+                color: white;
+            }}
+            QLineEdit, QTextEdit, QPlainTextEdit, QScrollArea {{
+                background-color: {sidebar_bg};
+                color: {fg};
+                border: 1px solid {border};
+                border-radius: 4px;
+            }}
+            QListWidget, QTableWidget, QTreeWidget {{
+                background-color: {sidebar_bg};
+                color: {fg};
+                border: 1px solid {border};
+            }}
+            QTabWidget::pane {{
+                border: 1px solid {border};
+            }}
+            QTabBar::tab {{
+                background: {sidebar_bg};
+                color: {fg};
+                padding: 5px 10px;
+                border: 1px solid {border};
+            }}
+            QTabBar::tab:selected {{
+                background: {bg};
+            }}
+        """
+        dialog.setStyleSheet(style)
+
     def _show_settings_dialog(self):
         dlg = SettingsDialog(self.config_manager, self.theme_manager, self.font_manager, self)
+        self._apply_theme_to_dialog(dlg)
         dlg.exec()
 
     def _apply_config_globally(self, config):
@@ -772,6 +838,7 @@ class JCodeMainWindow(QMainWindow):
     def _show_help_window(self):
         """Exibe a janela de ajuda sólida."""
         help_win = HelpWindow(self)
+        self._apply_theme_to_dialog(help_win)
         help_win.exec()
 
     def _show_store_dialog(self):
@@ -782,6 +849,7 @@ class JCodeMainWindow(QMainWindow):
     def _show_about_dialog(self):
         info = AboutInfo()
         dlg = AboutWindow(info, root_dir, self)
+        self._apply_theme_to_dialog(dlg)
         dlg.exec()
 
     def _show_theme_editor(self):

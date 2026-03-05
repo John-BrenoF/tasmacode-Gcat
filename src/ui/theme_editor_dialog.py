@@ -18,7 +18,10 @@ class ThemeEditorDialog(QDialog):
         
         self.setWindowTitle("Editor de Temas")
         self.resize(800, 600)
-        self.setStyleSheet("background-color: #252526; color: #cccccc;")
+        
+        bg = self.theme_manager.current_theme.get("background", "#252526")
+        fg = self.theme_manager.current_theme.get("foreground", "#cccccc")
+        self.setStyleSheet(f"background-color: {bg}; color: {fg};")
 
         # --- Layout Principal ---
         main_layout = QVBoxLayout(self)
