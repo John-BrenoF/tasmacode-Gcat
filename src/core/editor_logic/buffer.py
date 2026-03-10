@@ -509,6 +509,13 @@ class DocumentBuffer:
         self.update_last_cursor(line, len(self._lines[line]))
         self.cursors[-1].anchor_col = 0
 
+    def select_all(self):
+        """Seleciona todo o conteúdo do buffer."""
+        if not self._lines: return
+        last_line = len(self._lines) - 1
+        last_col = len(self._lines[last_line])
+        self.cursors = [Cursor(last_line, last_col, 0, 0)]
+
     def undo(self):
         """Desfaz a última ação."""
         if not self._undo_stack:

@@ -14,6 +14,7 @@ if root_dir not in sys.path:
 from src.core.editor_logic.buffer import DocumentBuffer
 from src.core.editor_logic.file_manager import FileManager
 from src.core.ui_logic.extension_bridge import ExtensionBridge, EditorAPI
+from src.core.editor_logic.clipboard_manager import ClipboardManager
 from src.core.editor_logic.autocomplete_manager import AutocompleteManager
 from src.core.editor_logic.search_manager import SearchManager
 from src.core.syntax_highlighter import SyntaxHighlighter
@@ -69,6 +70,7 @@ class JCodeMainWindow(QMainWindow):
         self.search_manager = SearchManager()
         self.extension_bridge = ExtensionBridge()
         self.autocomplete_manager = AutocompleteManager()
+        self.clipboard_manager = ClipboardManager(self)
         
         themes_path = os.path.join(root_dir, "themes")
         self.theme_manager = ThemeManager(themes_path)
@@ -1205,7 +1207,7 @@ class JCodeMainWindow(QMainWindow):
             editor = CodeEditor()
             editor.set_cache_dir(self.cache_dir)
             editor.set_file_path(path)
-            editor.set_dependencies(buffer, self.theme_manager, self.highlighter, self.autocomplete_manager)
+            editor.set_dependencies(buffer, self.theme_manager, self.highlighter, self.autocomplete_manager, self.clipboard_manager)
             editor.set_input_mapper(self.input_mapper)
             # Aplica configurações atuais ao novo editor
             editor.update_settings(self.config_manager.config)
@@ -1219,6 +1221,10 @@ class JCodeMainWindow(QMainWindow):
             editor.text_changed.connect(on_editor_text_changed)
             editor.text_changed.connect(self._check_autocomplete_trigger)
             editor.cursor_moved.connect(self._hide_autocomplete)
+            
+            # Conecta sinais do menu de contexto
+            editor.save_requested.connect(self._save_file)
+            editor.close_requested.connect(self._close_current_tab)
 
             # Conecta o sinal de modificação deste buffer específico
             editor.setProperty("event_handler", handler)

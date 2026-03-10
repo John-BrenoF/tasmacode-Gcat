@@ -4,6 +4,8 @@ from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QPen, QFontInfo
 from plugins.line_number_area import LineNumberArea
 from .autocomplete_widget import AutocompleteWidget, ParameterHintWidget
 from src.core.editor_logic.marker_manager import MarkerManager
+from src.core.editor_logic.context_menu_logic import ContextMenuLogic
+from src.ui.editor_context_menu import EditorContextMenu
 
 class CodeEditor(QAbstractScrollArea):
     """Canvas de edição de código com renderização customizada.
@@ -14,6 +16,8 @@ class CodeEditor(QAbstractScrollArea):
     text_changed = Signal()
     cursor_moved = Signal()
     markers_changed = Signal()
+    save_requested = Signal()
+    close_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -88,11 +92,12 @@ class CodeEditor(QAbstractScrollArea):
         self.buffer = buffer
         self.buffer.dirty = False  # Initialize the dirty flag
         self._recalculate_layout()
-    def set_dependencies(self, buffer, theme_manager, highlighter, autocomplete_manager):
+    def set_dependencies(self, buffer, theme_manager, highlighter, autocomplete_manager, clipboard_manager):
         self.buffer = buffer
         self.theme = theme_manager
         self.highlighter = highlighter
         self.autocomplete_manager = autocomplete_manager
+        self.clipboard_manager = clipboard_manager
         if self.autocomplete_manager and not self.autocomplete_widget:
             self.autocomplete_widget = AutocompleteWidget(self)
             self.autocomplete_widget.suggestion_selected.connect(self._on_suggestion_selected)
@@ -199,6 +204,21 @@ class CodeEditor(QAbstractScrollArea):
             action_color.triggered.connect(lambda: self._edit_marker_color(line_number))
 
         menu.exec(global_pos)
+
+    def contextMenuEvent(self, event):
+        """Exibe o menu de contexto customizado do editor."""
+        if not self.buffer: return
+        
+        # Cria a lógica e o menu sob demanda
+        logic = ContextMenuLogic(
+            self.buffer, 
+            save_callback=self.save_requested.emit,
+            close_callback=self.close_requested.emit,
+            clipboard_manager=self.clipboard_manager
+        )
+        
+        menu = EditorContextMenu(logic, self.theme, self)
+        menu.exec(event.globalPos())
 
     def _toggle_marker(self, line):
         self.marker_manager.toggle_marker(line)
