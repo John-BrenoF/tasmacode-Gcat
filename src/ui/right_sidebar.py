@@ -2,8 +2,23 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineE
                                QFileDialog, QMessageBox, QFrame, QStackedWidget, QScrollArea, QMenu, 
                                QInputDialog, QApplication, QStyle, QComboBox, QDialog, QListWidget, QTextEdit, QToolButton, QSizePolicy, QListWidgetItem)
 from PySide6.QtCore import Qt, QRect, QPointF, Signal, QPoint
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPainterPath, QFontMetrics, QCursor, QSyntaxHighlighter, QTextCharFormat, QPixmap
+from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QFont, QPainterPath, 
+                           QFontMetrics, QCursor, QSyntaxHighlighter, QTextCharFormat, QPixmap)
+from PySide6.QtCore import QThread
 from src.core.git_logic import GitLogic
+
+class LineCounterThread(QThread):
+    """Thread para contar as linhas do projeto sem congelar a UI."""
+    count_ready = Signal(int, int) # file_count, line_count
+
+    def __init__(self, git_logic, repo_path, parent=None):
+        super().__init__(parent)
+        self.git_logic = git_logic
+        self.repo_path = repo_path
+
+    def run(self):
+        file_count, line_count = self.git_logic.count_project_lines(self.repo_path)
+        self.count_ready.emit(file_count, line_count)
 
 class CommitTooltip(QLabel):
     """Tooltip customizado flutuante para commits."""
@@ -38,7 +53,7 @@ class DiffHighlighter(QSyntaxHighlighter):
         self.added_fmt.setForeground(QColor("#a6e22e")) # Verde
         
         self.removed_fmt = QTextCharFormat()
-        self.removed_fmt.setForeground(QColor("#f92672")) # Vermelho
+        self.removed_fmt.setForeground(QColor("#f92672")) # Rosa/Vermelho
         
         self.header_fmt = QTextCharFormat()
         self.header_fmt.setForeground(QColor("#66d9ef")) # Azul
@@ -189,6 +204,7 @@ class GitGraphWidget(QWidget):
         self.hover_pos = QPoint(0, 0)
         self.bg_color = QColor("#1e1e1e")
         self.text_color = QColor("#cccccc")
+        self.font_metrics_msg = QFontMetrics(self.font())
         # Cores para os branches
         self.colors = [
             QColor("#40c463"), QColor("#f38ba8"), QColor("#89b4fa"), 
@@ -200,6 +216,7 @@ class GitGraphWidget(QWidget):
     def set_data(self, commits):
         self.commits = commits
         self.setMinimumHeight(len(commits) * self.row_height + 20)
+        self.font_metrics_msg = QFontMetrics(self.font()) # Recalculate on data change if font can change
         self.update()
 
     def set_theme_colors(self, bg, fg):
@@ -260,11 +277,12 @@ class GitGraphWidget(QWidget):
         font_refs.setPointSize(9)
         font_refs.setBold(True)
         
-        font_msg = self.font()
-        font_msg.setPointSize(9)
+        font_msg = self.font() # Use font from widget
+        font_msg.setPointSize(10) # Slightly larger for readability
+        self.font_metrics_msg = QFontMetrics(font_msg)
 
         # Estado para o desenho do grafo
-        # lanes: lista de hashes de commit esperados na próxima linha
+        # lanes: lista de hashes de commit esperados na próxima linha.
         # O índice na lista representa a 'trilha' visual (coluna)
         lanes = [] 
         
@@ -273,6 +291,7 @@ class GitGraphWidget(QWidget):
 
         for commit in self.commits:
             commit_hash = commit['hash']
+            is_hovered = self.hovered_commit and self.hovered_commit['hash'] == commit_hash
             
             # Determina a lane deste commit
             if commit_hash in lanes:
@@ -346,31 +365,32 @@ class GitGraphWidget(QWidget):
             for p_idx in parent_positions:
                 target_x = 20 + (p_idx * self.lane_width)
                 target_y = y + self.row_height
-                
-                painter.setPen(QPen(node_color, 2))
+
+                pen_width = 3 if is_hovered else 2
+                painter.setPen(QPen(node_color, pen_width))
                 painter.setBrush(Qt.NoBrush)
                 
                 path = QPainterPath()
                 path.moveTo(node_x, y)
                 
                 if p_idx == node_lane_idx:
+                    # Linha reta para o pai direto
                     path.lineTo(target_x, target_y)
                 else:
-                    ctrl1 = QPointF(node_x, y + self.row_height * 0.5)
-                    ctrl2 = QPointF(target_x, target_y - self.row_height * 0.5)
+                    # Curva suave para merges ou branches
+                    ctrl1 = QPointF(node_x, y + self.row_height * 0.6)
+                    ctrl2 = QPointF(target_x, target_y - self.row_height * 0.6)
                     path.cubicTo(ctrl1, ctrl2, QPointF(target_x, target_y))
                 
                 painter.drawPath(path)
 
             # 3. Desenha o Nó do commit
-            painter.setPen(QPen(node_color, 2))
+            radius = self.node_radius + (2 if is_hovered else 0)
+            pen_width = 3 if is_hovered else 2
+            painter.setPen(QPen(node_color, pen_width))
             painter.setBrush(QBrush(self.bg_color))
-            node_rect = QRect(node_x - self.node_radius, y - self.node_radius, self.node_radius*2, self.node_radius*2)
+            node_rect = QRect(node_x - radius, y - radius, radius*2, radius*2)
             painter.drawEllipse(node_rect)
-            
-            # Ponto central preenchido
-            painter.setBrush(QBrush(node_color))
-            painter.drawEllipse(node_x - 2, y - 2, 4, 4)
             
             self.hit_areas.append((node_rect, commit))
 
@@ -383,17 +403,14 @@ class GitGraphWidget(QWidget):
             if commit['refs']:
                 painter.setFont(font_refs)
                 painter.setPen(QColor("#ffcc00"))
-                painter.drawText(text_x, y + 4, commit['refs'])
-                fm = QFontMetrics(font_refs)
-                text_x += fm.horizontalAdvance(commit['refs']) + 8
+                painter.drawText(text_x, y + 4, commit['refs']) # y+4 para alinhar verticalmente
+                text_x += QFontMetrics(font_refs).horizontalAdvance(commit['refs']) + 8
 
             # Mensagem
             painter.setFont(font_msg)
             painter.setPen(self.text_color)
             # Elide text se for muito longo
-            msg = commit['message']
-            fm = QFontMetrics(font_msg)
-            elided_msg = fm.elidedText(msg, Qt.TextElideMode.ElideRight, self.width() - text_x - 10)
+            elided_msg = self.font_metrics_msg.elidedText(commit['message'], Qt.TextElideMode.ElideRight, self.width() - text_x - 10)
             painter.drawText(text_x, y + 4, elided_msg)
 
             # Atualiza estado para a próxima iteração
@@ -408,6 +425,7 @@ class RightSidebar(QWidget):
         self.git_logic = GitLogic()
         self.auth_logic = None
         self.theme = {}
+        self.line_counter_thread = None
         self.setObjectName("RightSidebar")
         self.setMinimumWidth(200)
         
@@ -459,8 +477,8 @@ class RightSidebar(QWidget):
         
         # Header Git
         header_frame = QFrame()
-        header_layout = QHBoxLayout(header_frame)
-        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout = QHBoxLayout(header_frame) # Adiciona margens para respiro
+        header_layout.setContentsMargins(5, 5, 5, 5)
         
         self.branch_selector = QComboBox()
         self.branch_selector.currentIndexChanged.connect(self._switch_branch)
@@ -468,39 +486,40 @@ class RightSidebar(QWidget):
         btn_new_branch = QPushButton()
         btn_new_branch.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
         btn_new_branch.setToolTip("Criar Nova Branch")
-        btn_new_branch.setFixedSize(24, 24)
-        btn_new_branch.setStyleSheet("background-color: transparent; border: none; border-radius: 4px;")
+        btn_new_branch.setFixedSize(28, 28)
         btn_new_branch.clicked.connect(self._create_branch)
         
         btn_commit = QPushButton()
         btn_commit.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton))
         btn_commit.setToolTip("Commit")
-        btn_commit.setFixedSize(26, 26)
-        btn_commit.setStyleSheet("background-color: transparent; border: none; border-radius: 4px; margin-left: 5px;")
+        btn_commit.setFixedSize(28, 28)
         btn_commit.clicked.connect(self._perform_commit)
 
         btn_pull = QPushButton()
         btn_pull.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown))
         btn_pull.setToolTip("Pull")
-        btn_pull.setFixedSize(26, 26)
-        btn_pull.setStyleSheet("background-color: transparent; border: none; border-radius: 4px;")
+        btn_pull.setFixedSize(28, 28)
         btn_pull.clicked.connect(self._perform_pull)
 
         btn_push = QPushButton()
         btn_push.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowUp))
         btn_push.setToolTip("Push")
-        btn_push.setFixedSize(26, 26)
-        btn_push.setStyleSheet("background-color: transparent; border: none; border-radius: 4px;")
+        btn_push.setFixedSize(28, 28)
         btn_push.clicked.connect(self._perform_push)
 
         btn_refresh = QPushButton()
         btn_refresh.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
         btn_refresh.setToolTip("Atualizar")
-        btn_refresh.setFixedSize(26, 26)
-        btn_refresh.setStyleSheet("background-color: transparent; border: none; border-radius: 4px; margin-left: 5px;")
+        btn_refresh.setFixedSize(28, 28)
         btn_refresh.clicked.connect(self._refresh_graph)
         
         header_layout.addWidget(self.branch_selector, 1)
+        
+        self.lbl_line_count = QLabel("...")
+        self.lbl_line_count.setToolTip("Linhas de Código (rastreadas pelo Git)")
+        header_layout.addWidget(self.lbl_line_count)
+        
+        header_layout.addStretch()
         header_layout.addWidget(btn_new_branch)
         header_layout.addWidget(btn_commit)
         header_layout.addWidget(btn_pull)
@@ -523,23 +542,6 @@ class RightSidebar(QWidget):
         self.btn_toggle_staged.clicked.connect(lambda: self._toggle_section(self.staged_list, self.btn_toggle_staged))
         
         self.staged_list = QListWidget()
-        self.staged_list.setStyleSheet("""
-            QListWidget {
-                border: 1px solid #333333; 
-                color: #9cdcfe;
-                border-radius: 4px;
-            }
-            QListWidget::item {
-                padding: 4px;
-            }
-            QListWidget::item:selected {
-                background-color: #094771;
-                color: white;
-            }
-            QListWidget::item:hover {
-                background-color: #2a2d2e;
-            }
-        """)
         self.staged_list.setMaximumHeight(150)
         self.staged_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.staged_list.customContextMenuRequested.connect(lambda pos: self._show_file_context_menu(pos, is_staged=True))
@@ -564,23 +566,6 @@ class RightSidebar(QWidget):
         self.btn_toggle_unstaged.clicked.connect(lambda: self._toggle_section(self.unstaged_list, self.btn_toggle_unstaged))
         
         self.unstaged_list = QListWidget()
-        self.unstaged_list.setStyleSheet("""
-            QListWidget {
-                border: 1px solid #333333; 
-                color: #9cdcfe;
-                border-radius: 4px;
-            }
-            QListWidget::item {
-                padding: 4px;
-            }
-            QListWidget::item:selected {
-                background-color: #094771;
-                color: white;
-            }
-            QListWidget::item:hover {
-                background-color: #2a2d2e;
-            }
-        """)
         self.unstaged_list.setMaximumHeight(200)
         self.unstaged_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.unstaged_list.customContextMenuRequested.connect(lambda pos: self._show_file_context_menu(pos, is_staged=False))
@@ -621,6 +606,7 @@ class RightSidebar(QWidget):
         border = theme.get("border_color", "#3e3e42")
         accent = theme.get("accent", "#007acc")
         input_bg = theme.get("background", "#1e1e1e")
+        selection_bg = theme.get("selection", "#094771")
         
         self.setStyleSheet(f"""
             QWidget#RightSidebar {{
@@ -665,6 +651,7 @@ class RightSidebar(QWidget):
             self.current_repo = path
             self.stack.setCurrentWidget(self.page_git)
             self._refresh_graph()
+            self._update_project_stats()
         else:
             self.current_repo = None
             self.stack.setCurrentWidget(self.page_clone)
@@ -684,6 +671,7 @@ class RightSidebar(QWidget):
         commits = self.git_logic.get_graph_data(self.current_repo)
         self.graph_widget.set_data(commits)
         self._refresh_files()
+        self._update_project_stats()
 
     def _perform_commit(self):
         if not self.current_repo: return
@@ -792,6 +780,16 @@ class RightSidebar(QWidget):
             self.input_url.clear()
         else:
             QMessageBox.critical(self, "Erro", msg)
+
+    def _update_project_stats(self):
+        """Inicia a thread de contagem de linhas."""
+        if not self.current_repo: return
+        if self.line_counter_thread and self.line_counter_thread.isRunning():
+            return # Já está calculando
+        self.lbl_line_count.setText("Calculando...")
+        self.line_counter_thread = LineCounterThread(self.git_logic, self.current_repo)
+        self.line_counter_thread.count_ready.connect(lambda f, l: self.lbl_line_count.setText(f"{l:,} LOC"))
+        self.line_counter_thread.start()
 
     def _copy_hash(self, commit_hash):
         QApplication.clipboard().setText(commit_hash)

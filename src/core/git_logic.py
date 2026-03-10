@@ -278,3 +278,34 @@ class GitLogic:
             return True, "Arquivo removido do stage."
         except subprocess.CalledProcessError as e:
             return False, f"Erro ao remover do stage: {e.stderr.decode() if e.stderr else str(e)}"
+
+    def count_project_lines(self, repo_path: str) -> tuple[int, int]:
+        """
+        Conta o número total de linhas em todos os arquivos rastreados, respeitando .gitignore.
+        Retorna: (total_files, total_lines)
+        """
+        try:
+            # git ls-files lista todos os arquivos rastreados pelo git, respeitando automaticamente .gitignore
+            res = subprocess.run(["git", "ls-files"], cwd=repo_path, capture_output=True, text=True, check=True, encoding='utf-8', errors='ignore')
+            files = res.stdout.splitlines()
+            
+            total_lines = 0
+            file_count = len(files)
+
+            for file_path in files:
+                full_path = os.path.join(repo_path, file_path)
+                if not os.path.isfile(full_path):
+                    continue
+                try:
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        total_lines += sum(1 for _ in f)
+                except Exception:
+                    # Ignora arquivos binários ou com erros de codificação
+                    continue
+            
+            return file_count, total_lines
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return 0, 0
+        except Exception as e:
+            logger.error(f"Erro ao contar linhas do projeto: {e}")
+            return 0, 0

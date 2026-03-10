@@ -687,10 +687,11 @@ class CodeEditor(QAbstractScrollArea):
         viewport_h = self.viewport().height()
         
         active_lines = {c.line for c in self.buffer.cursors}
+        # Cor normal mais suave para um visual minimalista
         normal_color = QColor(self.theme.get_color("gutter_fg"))
+        normal_color.setAlpha(180) # Deixa os números não-ativos mais apagados
+
         active_color = QColor(self.theme.get_color("foreground"))
-        bold_font = QFont(self.font)
-        bold_font.setBold(True)
 
         if self.word_wrap_enabled and self._visual_lines:
             first_visual_line = scroll_y // self.line_height if self.line_height > 0 else 0
@@ -710,12 +711,12 @@ class CodeEditor(QAbstractScrollArea):
                         marker = self.marker_manager.get_marker(logical_line_idx)
                         painter.setBrush(QColor(marker.color))
                         painter.setPen(Qt.NoPen)
-                        # Círculo pequeno à esquerda
-                        painter.drawEllipse(QPoint(6, int(y + self.line_height / 2)), 3, 3)
+                        # Barra vertical minimalista
+                        painter.drawRect(2, int(y + 4), 3, self.line_height - 8)
 
                     if logical_line_idx in active_lines:
                         painter.setPen(active_color)
-                        painter.setFont(bold_font)
+                        painter.setFont(self.font)
                     else:
                         painter.setPen(normal_color)
                         painter.setFont(self.font)
@@ -738,15 +739,14 @@ class CodeEditor(QAbstractScrollArea):
                     marker = self.marker_manager.get_marker(line_idx)
                     painter.setBrush(QColor(marker.color))
                     painter.setPen(Qt.NoPen)
-                    # Círculo pequeno à esquerda
-                    painter.drawEllipse(QPoint(6, int(y + self.line_height / 2)), 3, 3)
+                    # Barra vertical minimalista
+                    painter.drawRect(2, int(y + 4), 3, self.line_height - 8)
                 
                 if line_idx in active_lines:
                     painter.setPen(active_color)
-                    painter.setFont(bold_font)
                 else:
                     painter.setPen(normal_color)
-                    painter.setFont(self.font)
+                painter.setFont(self.font)
                 painter.drawText(0, int(y), self.line_number_area.width() - 5, self.line_height, Qt.AlignmentFlag.AlignRight, str(line_idx + 1))
 
     def paintEvent(self, event):
