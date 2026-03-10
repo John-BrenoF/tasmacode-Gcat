@@ -1,5 +1,6 @@
 import subprocess
 import os
+import re
 import logging
 from urllib.parse import quote
 
@@ -179,6 +180,38 @@ class GitLogic:
             return res.stdout
         except:
             return "Não foi possível obter o diff."
+
+    def get_commit_stats(self, repo_path: str, commit_hash: str) -> dict:
+        """
+        Retorna estatísticas de um commit específico (arquivos alterados, inserções, deleções).
+        """
+        try:
+            # Tenta com 'git show' primeiro, que funciona para a maioria dos commits
+            cmd = ["git", "show", commit_hash, "--shortstat", "--pretty="]
+            res = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True, check=True, encoding='utf-8', errors='ignore')
+            
+            stat_line = ""
+            output_lines = res.stdout.strip().splitlines()
+            if output_lines:
+                # A linha de stats é geralmente a última linha não vazia
+                for line in reversed(output_lines):
+                    if "changed" in line:
+                        stat_line = line.strip()
+                        break
+            
+            files_match = re.search(r'(\d+)\s+file', stat_line)
+            insertions_match = re.search(r'(\d+)\s+insertion', stat_line)
+            deletions_match = re.search(r'(\d+)\s+deletion', stat_line)
+            
+            return {
+                "files": int(files_match.group(1)) if files_match else 0,
+                "insertions": int(insertions_match.group(1)) if insertions_match else 0,
+                "deletions": int(deletions_match.group(1)) if deletions_match else 0
+            }
+        except Exception as e:
+            logger.error(f"Erro ao obter stats do commit {commit_hash}: {e}")
+            # Retorna -1 para indicar que houve um erro ao buscar os dados
+            return {"files": -1, "insertions": -1, "deletions": -1}
 
     def get_staged_files(self, repo_path: str) -> list[str]:
         """Retorna lista de arquivos na área de stage."""

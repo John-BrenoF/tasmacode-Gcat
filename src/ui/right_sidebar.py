@@ -2,10 +2,25 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineE
                                QFileDialog, QMessageBox, QFrame, QStackedWidget, QScrollArea, QMenu, 
                                QInputDialog, QApplication, QStyle, QComboBox, QDialog, QListWidget, QTextEdit, QToolButton, QSizePolicy, QListWidgetItem)
 from PySide6.QtCore import Qt, QRect, QPointF, Signal, QPoint
-from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QFont, QPainterPath, 
+from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QFont, QPainterPath,
                            QFontMetrics, QCursor, QSyntaxHighlighter, QTextCharFormat, QPixmap)
 from PySide6.QtCore import QThread
 from src.core.git_logic import GitLogic
+
+class CommitStatsThread(QThread):
+    """Thread para buscar estatísticas de um commit."""
+    stats_ready = Signal(dict) # Emits {'hash': str, 'stats': dict}
+
+    def __init__(self, git_logic, repo_path, commit_hash, parent=None):
+        super().__init__(parent)
+        self.git_logic = git_logic
+        self.repo_path = repo_path
+        self.commit_hash = commit_hash
+
+    def run(self):
+        stats = self.git_logic.get_commit_stats(self.repo_path, self.commit_hash)
+        if stats:
+            self.stats_ready.emit({'hash': self.commit_hash, 'stats': stats})
 
 class LineCounterThread(QThread):
     """Thread para contar as linhas do projeto sem congelar a UI."""
@@ -36,10 +51,27 @@ class CommitTooltip(QLabel):
 
     def show_data(self, commit, pos):
         content = (f"<b style='color: #ffffff'>Hash:</b> {commit['hash'][:8]}<br>"
-                   f"<b style='color: #ffffff'>Autor:</b> {commit['author']}<br>"
-                   f"<b style='color: #ffffff'>Data:</b> {commit['date']}<br>"
-                   f"<hr style='background-color: #454545; height: 1px; border: none;'>"
-                   f"{commit['message'].replace(chr(10), '<br>')}")
+                   f"<b style='color: #ffffff'>Autor:</b> {commit['author']}<br>")
+
+        # Adiciona stats se disponíveis
+        if 'files' in commit:
+            files = commit['files']
+            insertions = commit.get('insertions', 0)
+            deletions = commit.get('deletions', 0)
+            
+            if files >= 0: # Verifica se não houve erro (-1)
+                stats_parts = [f"{files} arquivo(s) alterado(s)"]
+                if insertions > 0:
+                    stats_parts.append(f"<span style='color: #a6e22e;'>+{insertions}</span>")
+                if deletions > 0:
+                    stats_parts.append(f"<span style='color: #f92672;'>-{deletions}</span>")
+                content += f"<b style='color: #ffffff'>Stats:</b> {', '.join(stats_parts)}<br>"
+            else:
+                content += f"<b style='color: #ffffff'>Stats:</b> <i>Erro ao carregar</i><br>"
+        elif commit.get('loading_stats'):
+             content += f"<b style='color: #ffffff'>Stats:</b> <i>Carregando...</i><br>"
+
+        content += (f"<hr style='background-color: #454545; height: 1px; border: none;'>{commit['message'].replace(chr(10), '<br>')}")
         self.setText(content)
         self.adjustSize()
         self.move(pos)
@@ -191,8 +223,10 @@ class GitGraphWidget(QWidget):
     commit_clicked = Signal(dict)
     copy_hash_requested = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, git_logic, parent=None):
         super().__init__(parent)
+        self.git_logic = git_logic
+        self.repo_path = None
         self.commits = []
         self.row_height = 36 # Altura aumentada para melhor espaçamento
         self.node_radius = 6
@@ -205,6 +239,8 @@ class GitGraphWidget(QWidget):
         self.bg_color = QColor("#1e1e1e")
         self.text_color = QColor("#cccccc")
         self.font_metrics_msg = QFontMetrics(self.font())
+        self.stats_thread = None
+        self.stats_cache = {}
         # Cores para os branches
         self.colors = [
             QColor("#40c463"), QColor("#f38ba8"), QColor("#89b4fa"), 
@@ -236,19 +272,44 @@ class GitGraphWidget(QWidget):
         """Detecta hover sobre os commits."""
         pos = event.position().toPoint()
         self.hover_pos = pos
-        found = None
+        found_commit = None
         for rect, commit in self.hit_areas:
             if rect.adjusted(-5, -5, 5, 5).contains(pos):
-                found = commit
+                found_commit = commit
                 break
         
-        if found:
-            global_pos = self.mapToGlobal(pos) + QPoint(15, 15)
-            self.tooltip_widget.show_data(found, global_pos)
-            self.hovered_commit = found
-        else:
+        # Se o mouse saiu de um commit, esconde o tooltip
+        if not found_commit and self.hovered_commit:
             self.tooltip_widget.hide()
             self.hovered_commit = None
+            return
+
+        # Se o mouse está sobre um commit
+        if found_commit:
+            # Se é o mesmo commit, não faz nada
+            if self.hovered_commit and self.hovered_commit['hash'] == found_commit['hash']:
+                return
+
+            # É um novo commit para hover
+            self.hovered_commit = found_commit
+            global_pos = self.mapToGlobal(pos) + QPoint(15, 15)
+
+            # Verifica o cache
+            if found_commit['hash'] in self.stats_cache:
+                found_commit.update(self.stats_cache[found_commit['hash']])
+                self.tooltip_widget.show_data(found_commit, global_pos)
+            else:
+                # Mostra tooltip com info básica e "Carregando..."
+                found_commit['loading_stats'] = True
+                self.tooltip_widget.show_data(found_commit, global_pos)
+                
+                # Inicia thread para buscar os stats
+                if self.stats_thread and self.stats_thread.isRunning():
+                    self.stats_thread.terminate() # Cancela a anterior
+                
+                self.stats_thread = CommitStatsThread(self.git_logic, self.repo_path, found_commit['hash'])
+                self.stats_thread.stats_ready.connect(self._on_stats_ready)
+                self.stats_thread.start()
         
         super().mouseMoveEvent(event)
 
@@ -265,6 +326,22 @@ class GitGraphWidget(QWidget):
             menu.addAction("Copiar Hash", lambda: self.copy_hash_requested.emit(self.hovered_commit['hash']))
             menu.addAction("Copiar Mensagem", lambda: QApplication.clipboard().setText(self.hovered_commit['message']))
             menu.exec(event.globalPos())
+
+    def _on_stats_ready(self, stats_data):
+        commit_hash = stats_data['hash']
+        stats = stats_data['stats']
+        
+        # Salva no cache
+        self.stats_cache[commit_hash] = stats
+        
+        # Se o mouse ainda estiver sobre o mesmo commit, atualiza o tooltip
+        if self.hovered_commit and self.hovered_commit['hash'] == commit_hash:
+            self.hovered_commit.update(stats)
+            if 'loading_stats' in self.hovered_commit:
+                del self.hovered_commit['loading_stats']
+            
+            global_pos = self.mapToGlobal(self.hover_pos) + QPoint(15, 15)
+            self.tooltip_widget.show_data(self.hovered_commit, global_pos)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -580,7 +657,7 @@ class RightSidebar(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         
-        self.graph_widget = GitGraphWidget()
+        self.graph_widget = GitGraphWidget(self.git_logic)
         self.graph_widget.copy_hash_requested.connect(self._copy_hash)
         self.graph_widget.commit_clicked.connect(self._open_commit_details)
         scroll.setWidget(self.graph_widget)
@@ -649,6 +726,7 @@ class RightSidebar(QWidget):
         """Chamado quando um projeto é aberto."""
         if self.git_logic.is_repo(path):
             self.current_repo = path
+            self.graph_widget.repo_path = path # Define o caminho do repo no widget
             self.stack.setCurrentWidget(self.page_git)
             self._refresh_graph()
             self._update_project_stats()
