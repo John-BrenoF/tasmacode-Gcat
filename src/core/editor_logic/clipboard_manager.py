@@ -43,3 +43,8 @@ class ClipboardManager(QObject):
     def get_history(self) -> list[str]:
         """Retorna o histórico da área de transferência, com o mais recente primeiro."""
         return self._history
+
+    def clear_history(self):
+        """Limpa o histórico da área de transferência."""
+        self._history.clear()
+        self.history_changed.emit()

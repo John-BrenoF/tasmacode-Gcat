@@ -1,5 +1,5 @@
-from PySide6.QtWidgets import QMenu
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtWidgets import QMenu, QGraphicsDropShadowEffect
+from PySide6.QtGui import QAction, QIcon, QColor
 from PySide6.QtWidgets import QStyle
 
 class EditorContextMenu(QMenu):
@@ -11,16 +11,25 @@ class EditorContextMenu(QMenu):
         super().__init__(parent)
         self.logic = logic
         self.theme_manager = theme_manager
+
+        # Adiciona uma sombra para um visual mais moderno
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(18)
+        shadow.setXOffset(0)
+        shadow.setYOffset(2)
+        shadow.setColor(QColor(0, 0, 0, 160))
+        self.setGraphicsEffect(shadow)
+
         self._setup_ui()
         self._apply_theme()
 
     def _setup_ui(self):
         # Ações de Edição
-        self._add_action("Selecionar Tudo", self.logic.select_all, QStyle.StandardPixmap.SP_FileDialogDetailedView, "Ctrl+A")
+        self._add_action("Selecionar Tudo", self.logic.select_all, shortcut="Ctrl+A")
         self.addSeparator()
-        self._add_action("Copiar", self.logic.copy, QStyle.StandardPixmap.SP_FileIcon, "Ctrl+C")
-        self._add_action("Recortar", self.logic.cut, QStyle.StandardPixmap.SP_FileIcon, "Ctrl+X")
-        self._add_action("Colar", self.logic.paste, QStyle.StandardPixmap.SP_FileIcon, "Ctrl+V")
+        self._add_action("Copiar", self.logic.copy, shortcut="Ctrl+C")
+        self._add_action("Recortar", self.logic.cut, shortcut="Ctrl+X")
+        self._add_action("Colar", self.logic.paste, shortcut="Ctrl+V")
         self._setup_clipboard_history()
         self.addSeparator()
         
@@ -44,20 +53,25 @@ class EditorContextMenu(QMenu):
             return
 
         history = self.logic.clipboard_manager.get_history()
-        if not history:
-            return
 
         history_menu = self.addMenu("Histórico de Cópia")
         history_menu.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogResetButton))
 
-        for i, text in enumerate(history):
-            # Limita o texto exibido para não quebrar o layout do menu
-            display_text = text.strip().replace('\n', ' ↵ ')
-            if len(display_text) > 50:
-                display_text = display_text[:50] + "..."
-            
-            action = history_menu.addAction(f"{i+1}. {display_text}")
-            action.triggered.connect(lambda checked=False, t=text: self.logic.paste_from_history(t))
+        if history:
+            for i, text in enumerate(history):
+                # Limita o texto exibido para não quebrar o layout do menu
+                display_text = text.strip().replace('\n', ' ↵ ')
+                if len(display_text) > 50:
+                    display_text = display_text[:50] + "..."
+                
+                action = history_menu.addAction(f"{i+1}. {display_text}")
+                action.triggered.connect(lambda checked=False, t=text: self.logic.paste_from_history(t))
+            history_menu.addSeparator()
+
+        clear_action = history_menu.addAction("Limpar Histórico")
+        clear_action.triggered.connect(self.logic.clear_clipboard_history)
+        if not history:
+            clear_action.setEnabled(False)
 
     def _apply_theme(self):
         """Aplica o tema atual ao menu."""
@@ -65,29 +79,44 @@ class EditorContextMenu(QMenu):
             return
             
         theme = self.theme_manager.current_theme
-        bg = theme.get("sidebar_bg", "#252526")
+        bg_hex = theme.get("sidebar_bg", "#252526")
         fg = theme.get("foreground", "#cccccc")
         border = theme.get("border_color", "#3e3e42")
         accent = theme.get("accent", "#007acc")
         
+        # Converte a cor de fundo para RGBA para adicionar translucidez
+        bg_color = QColor(bg_hex)
+        bg_rgba = f"rgba({bg_color.red()}, {bg_color.green()}, {bg_color.blue()}, 0.95)" # 95% de opacidade
+
         self.setStyleSheet(f"""
             QMenu {{
-                background-color: {bg};
+                background-color: {bg_rgba};
                 color: {fg};
                 border: 1px solid {border};
-                padding: 5px;
+                padding: 6px;
+                border-radius: 8px;
             }}
             QMenu::item {{
-                padding: 5px 20px;
+                padding: 8px 25px;
                 border-radius: 4px;
+                margin: 2px 0;
             }}
             QMenu::item:selected {{
                 background-color: {accent};
                 color: white;
             }}
+            QMenu::item:disabled {{
+                color: #666;
+                background-color: transparent;
+            }}
             QMenu::separator {{
                 height: 1px;
                 background: {border};
-                margin: 5px 0;
+                margin: 6px 4px;
+            }}
+            QMenu::right-arrow {{
+                width: 16px;
+                height: 16px;
+                padding-left: 10px;
             }}
         """)

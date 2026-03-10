@@ -39,6 +39,11 @@ class ContextMenuLogic:
             if text:
                 self.buffer.insert_text(text)
 
+    def clear_clipboard_history(self):
+        """Limpa o histórico da área de transferência."""
+        if self.clipboard_manager:
+            self.clipboard_manager.clear_history()
+
     def paste_from_history(self, text: str):
         """Cola um item específico do histórico no editor."""
         if self.buffer and text:
