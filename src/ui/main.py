@@ -778,6 +778,7 @@ class JCodeMainWindow(QMainWindow):
         
         self.custom_statusbar.apply_theme(self.theme_manager.current_theme)
         self.right_sidebar.apply_theme(self.theme_manager.current_theme)
+        self.editor_group.apply_theme(self.theme_manager.current_theme)
         
         if hasattr(self, 'custom_title_bar'):
             self.custom_title_bar.apply_theme(self.theme_manager.current_theme)
