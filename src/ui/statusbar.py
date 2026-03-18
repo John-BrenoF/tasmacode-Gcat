@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QStatusBar, QLabel, QPushButton, QWidget, QHBoxLayout, QStyle, QMenu
 from PySide6.QtCore import Qt, QTimer, QSize, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QIcon
 import os
 import json
 
@@ -23,7 +23,9 @@ class StatusBar(QStatusBar):
         super().__init__(parent)
         
         # Configuração de visibilidade
-        self.config_dir = os.path.join(os.path.expanduser("~"), ".jcode")
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        root_dir = os.path.abspath(os.path.join(current_dir, "../../"))
+        self.config_dir = os.path.join(root_dir, "cache", "configs")
         self.config_file = os.path.join(self.config_dir, "statusbar.json")
         self.widget_visibility = {}
         
@@ -169,8 +171,71 @@ class StatusBar(QStatusBar):
     def update_filename(self, filename: str):
         self.showMessage(filename)
 
+    def _get_language_from_path(self, path: str) -> str:
+        """Determina a linguagem de programação com base na extensão do arquivo."""
+        ext_map = {
+            '.py': 'Python',
+            '.js': 'JavaScript',
+            '.jsx': 'JavaScript (React)',
+            '.ts': 'TypeScript',
+            '.tsx': 'TypeScript (React)',
+            '.html': 'HTML',
+            '.htm': 'HTML',
+            '.css': 'CSS',
+            '.scss': 'SCSS',
+            '.json': 'JSON',
+            '.xml': 'XML',
+            '.md': 'Markdown',
+            '.c': 'C',
+            '.cpp': 'C++',
+            '.h': 'C/C++ Header',
+            '.java': 'Java',
+            '.rs': 'Rust',
+        }
+        _, ext = os.path.splitext(path)
+        return ext_map.get(ext.lower(), "Plain Text")
+
+    def update_language_display(self, file_path: str | None, is_code_editor: bool):
+        """Atualiza o display de linguagem com base no editor e caminho."""
+        if not is_code_editor:
+            self.update_lang("") # Limpa para visualizadores
+            return
+        
+        if file_path:
+            lang = self._get_language_from_path(file_path)
+            self.update_lang(lang)
+        else:
+            # É um CodeEditor, mas sem caminho (arquivo novo)
+            self.update_lang("Plain Text")
+
+    def _get_icon_for_lang(self, lang):
+        """Retorna um ícone apropriado para a linguagem."""
+        if not lang:
+            return QIcon()
+        
+        # Mapeamento para ícones de tema do sistema (padrão Freedesktop)
+        mime_map = {
+            "Python": "text-x-python",
+            "JavaScript": "text-javascript",
+            "HTML": "text-html",
+            "CSS": "text-css",
+            "C++": "text-x-c++src",
+            "Rust": "text-rust",
+            "Java": "text-x-java",
+            "Plain Text": "text-plain"
+        }
+        
+        icon_name = mime_map.get(lang, "text-plain")
+        icon = QIcon.fromTheme(icon_name)
+        
+        # Fallback para ícone genérico se o tema não tiver o ícone específico
+        if icon.isNull():
+            return self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon)
+        return icon
+
     def update_lang(self, lang):
         self.btn_lang.setText(lang)
+        self.btn_lang.setIcon(self._get_icon_for_lang(lang))
 
     def set_live_server_state(self, running: bool, host: str = "", port: int = 0):
         """Atualiza a aparência do botão do live server."""

@@ -606,13 +606,20 @@ class JCodeMainWindow(QMainWindow):
             self.event_handler.buffer = editor_widget.buffer
             self.viewport_controller.attach_to(editor_widget)
             
+            is_code_editor = isinstance(editor_widget, CodeEditor)
+            
             # Conecta sinais do novo editor
-            if isinstance(editor_widget, CodeEditor):
+            if is_code_editor:
                 editor_widget.markers_changed.connect(self._update_sidebar_markers)
                 self._update_sidebar_markers() # Atualiza inicial
+
+            # Atualiza a linguagem na barra de status
+            file_path = editor_widget.property("file_path")
+            self.custom_statusbar.update_language_display(file_path, is_code_editor)
         else:
             self.event_handler.buffer = None
             self.sidebar.update_markers([]) # Limpa marcadores
+            self.custom_statusbar.update_language_display(None, False)
             
         self._on_buffer_modified()
         # Limpa os highlights de busca ao trocar de aba
@@ -1043,8 +1050,6 @@ class JCodeMainWindow(QMainWindow):
         self.custom_statusbar.set_live_server_state(False)
         self.custom_statusbar.flash_message("Live Server parado.", color="#007acc")
 
-
-
     def _close_all_files(self):
         """Fecha todos os arquivos abertos, perguntando se deseja salvar."""
         count = self.editor_group.tab_widget.count()
@@ -1198,6 +1203,7 @@ class JCodeMainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Salvar Como...")
         if path:
             self.active_editor.set_file_path(path)
+            self.custom_statusbar.update_language_display(path, True)
             self._save_file()
 
     def _open_file(self, path):
