@@ -18,14 +18,18 @@ class StatusBar(QStatusBar):
     live_server_toggle_requested = Signal(bool)
     avatar_clicked = Signal()
 
+    WIDGET_DEFAULTS = {
+        "avatar": True, "cursor_info": True, "indent": True,
+        "encoding": True, "language": True, "live_server": True,
+        "live_link": True, "notifications": True
+    }
+
     def __init__(self, parent=None):
         self.theme = None
         super().__init__(parent)
         
         # Configuração de visibilidade
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        root_dir = os.path.abspath(os.path.join(current_dir, "../../"))
-        self.config_dir = os.path.join(root_dir, "cache", "configs")
+        self.config_dir = os.path.join(os.path.expanduser("~"), ".jcode")
         self.config_file = os.path.join(self.config_dir, "statusbar.json")
         self.widget_visibility = {}
         
@@ -123,19 +127,22 @@ class StatusBar(QStatusBar):
         self.showMessage("Pronto")
 
     def _load_visibility_config(self):
-        defaults = {
-            "avatar": True, "cursor_info": True, "indent": True,
-            "encoding": True, "language": True, "live_server": True,
-            "live_link": True, "notifications": True
-        }
+        # Começa com uma cópia nova dos padrões
+        config = self.WIDGET_DEFAULTS.copy()
+
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r') as f:
-                    config = json.load(f)
-                    defaults.update(config)
-            except (json.JSONDecodeError, IOError):
-                pass # Usa os padrões se o arquivo estiver corrompido
-        self.widget_visibility = defaults
+                    # Garante que o arquivo não esteja vazio antes de tentar carregar
+                    if os.path.getsize(self.config_file) > 0:
+                        user_config = json.load(f)
+                        if isinstance(user_config, dict):
+                            config.update(user_config) # Sobrescreve padrões com as configs do usuário
+            except (json.JSONDecodeError, IOError) as e:
+                # Se o arquivo estiver corrompido ou ilegível, usa os padrões.
+                print(f"Aviso: '{self.config_file}' corrompido. Usando padrões. Erro: {e}")
+        
+        self.widget_visibility = config
 
     def _save_visibility_config(self):
         try:
